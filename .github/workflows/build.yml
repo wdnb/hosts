@@ -28,7 +28,7 @@ jobs:
           ./adblock-aggregator
           # 运行后将生成 adblock_aggr_optimized.txt 文件
 
-# 4. 提交更改回仓库
+      # 4. 提交更改回仓库 <--- **这个步骤必须正确缩进在 steps 下**
       - name: Commit and Push new list
         run: |
           # 1. 配置 Git 用户信息
@@ -36,7 +36,6 @@ jobs:
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
           # 2. 追踪并添加新生成的文件
-          # 使用 git add -A 添加所有更改（包括新建文件），但只关注我们生成的 hosts 文件
           git add adblock_aggr_optimized.txt
           
           # 3. 检查是否有实际的更改（防止空提交）
@@ -48,7 +47,7 @@ jobs:
               
               # 5. 推送更改到 GitHub
               # 使用 GITHUB_TOKEN 认证进行推送
-              git push
+              git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           else
               echo "文件 adblock_aggr_optimized.txt 内容与上次提交相同，跳过提交。"
           fi
