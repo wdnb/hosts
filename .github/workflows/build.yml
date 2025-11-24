@@ -32,10 +32,11 @@ jobs:
       - name: Commit and Push new list
         uses: stefanzweifel/git-auto-commit-action@v5
         with:
-          # 只提交生成的规则文件，忽略缓存目录
+          # 明确告诉 Git 追踪所有更改（包括新的、修改的、删除的）
+          commit_options: '--all' 
+          # 确保只提交这个文件
           file_pattern: 'adblock_aggr_optimized.txt'
           commit_message: "🤖 Feat: Update aggregated adblock list (Daily Run)"
-          # 使用 GitHub Actions 默认 token
           commit_user_name: 'github-actions[bot]'
           commit_user_email: 'github-actions[bot]@users.noreply.github.com'
           commit_author: 'GitHub Actions <41898282+github-actions[bot]@users.noreply.github.com>'
