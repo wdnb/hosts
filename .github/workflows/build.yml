@@ -35,8 +35,8 @@ jobs:
           git config --global user.name 'github-actions[bot]'
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
-          # 2. 追踪并添加新生成的文件
-          git add adblock_aggr_optimized.txt
+          # 2. 强制追踪并添加新生成的文件
+          git add -f adblock_aggr_optimized.txt
           
           # 3. 检查是否有实际的更改（防止空提交）
           if ! git diff --cached --exit-code --quiet; then
