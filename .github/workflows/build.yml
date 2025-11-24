@@ -28,15 +28,26 @@ jobs:
           ./adblock-aggregator
           # 运行后将生成 adblock_aggr_optimized.txt 文件
 
-      # 4. 提交更改回仓库
+     # 4. 手动检测更改并提交
       - name: Commit and Push new list
-        uses: stefanzweifel/git-auto-commit-action@v5
-        with:
-          # 明确告诉 Git 追踪所有更改（包括新的、修改的、删除的）
-          commit_options: '--all' 
-          # 确保只提交这个文件
-          file_pattern: 'adblock_aggr_optimized.txt'
-          commit_message: "🤖 Feat: Update aggregated adblock list (Daily Run)"
-          commit_user_name: 'github-actions[bot]'
-          commit_user_email: 'github-actions[bot]@users.noreply.github.com'
-          commit_author: 'GitHub Actions <41898282+github-actions[bot]@users.noreply.github.com>'
+        run: |
+          # 1. 配置 Git 用户信息
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email 'github-actions[bot]@users.noreply.github.com'
+          
+          # 2. 追踪并添加新生成的文件
+          # 使用 git add -f 强制添加，以防出现权限或路径问题
+          git add -f ${GITHUB_WORKSPACE}/adblock_aggr_optimized.txt
+          
+          # 3. 检查是否有实际的更改（防止空提交）
+          if git status --porcelain | grep -q 'adblock_aggr_optimized.txt'; then
+            echo "发现文件 adblock_aggr_optimized.txt 存在更改，开始提交..."
+            
+            # 4. 提交更改
+            git commit -m "🤖 Feat: Update aggregated adblock list (Daily Run)"
+            
+            # 5. 推送更改到 GitHub
+            git push
+          else
+            echo "文件 adblock_aggr_optimized.txt 内容与上次提交相同，跳过提交。"
+          fi
