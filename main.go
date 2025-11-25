@@ -17,60 +17,51 @@ import (
 // -----------------------------------------------------------------------------
 
 const (
-	OutputFile = "adblock_aggr_optimized.txt"      // 输出的规则文件
-	DebugFile  = "adblock_debug_unrecognized.txt"  // 被清洗掉的脏数据
-	UserAgent  = "AdGuard-HostlistCompiler-Go/1.0" // 请求头
+	OutputFile           = "adblock_aggr_optimized.txt"      // 输出的规则文件
+	DebugFile            = "adblock_debug_unrecognized.txt"  // 被清洗掉的脏数据
+	UserAgent            = "AdGuard-HostlistCompiler-Go/1.0" // 请求头
+	InvalidDomainsSource = "invalid_domains.txt"             // 可以是本地路径或 GitHub URL (e.g., "https://raw.githubusercontent.com/user/repo/main/invalid_domains.txt")
 )
 
 // Upstreams 上游规则源列表
 // 可以在这里添加任意 URL，程序会自动并发下载
 var Upstreams = []string{
 	"https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockdns.txt", //217heidai
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt",                  // AdGuard DNS filter
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt",  // AdAway Default Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt", // 1Hosts (Lite)
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_70.txt", // 1Hosts (Xtra)
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt", // AdGuard DNS Popup Hosts filter
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_53.txt", // AWAvenue Ads Rule (已移除)
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_4.txt",  // Dan Pollock's List (已移除)
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_34.txt", // HaGeZi's Normal Blocklist
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_48.txt", // HaGeZi's Pro Blocklist
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_51.txt", // HaGeZi's Pro++ Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_49.txt", // HaGeZi's Ultimate Blocklist
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_5.txt",  // OISD Blocklist Small
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt", // OISD Blocklist Big
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt",  // Peter Lowe's Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_69.txt", // ShadowWhisperer Tracking List
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_33.txt", // Steven Black's List (已移除)
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt", // Dandelion Sprout's Anti Push Notifications
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt",  // Dandelion Sprout's Game Console Adblock List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt", // HaGeZi's Allowlist Referral
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt", // HaGeZi's Apple Tracker Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_47.txt", // HaGeZi's Gambling Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_66.txt", // HaGeZi's OPPO & Realme Tracker Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt", // Malicious URL Blocklist (URLHaus)
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_61.txt", // HaGeZi's Samsung Tracker Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt", // uBlock₀ filters – Badware risks
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt",  // The Big List of Hacked Malware Web Sites
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt", // Stalkerware Indicators List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt", // ShadowWhisperer's Malware List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt", // Scam Blocklist by DurableNapkin
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_65.txt", // HaGeZi's Vivo Tracker Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt", // Phishing Army
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt", // HaGeZi's Windows/Office Tracker Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_60.txt", // HaGeZi's Xiaomi Tracker Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt",  // NoCoin Filter List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt",  // Perflyst and Dandelion Sprout's Smart-TV Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_44.txt", // HaGeZi's Threat Intelligence Feeds
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_56.txt", // HaGeZi's The World's Most Abused TLDs
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_57.txt", // ShadowWhisperer's Dating List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_54.txt", // HaGeZi's DynDNS Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_71.txt", // HaGeZi's DNS Rebind Protection
-	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_29.txt", // CHN: AdRules DNS List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_55.txt", // HaGeZi's Badware Hoster Blocklist
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt", // CHN: anti-AD
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt", // Dandelion Sprout's Anti-Malware List
-	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt", // Phishing URL Blocklist (PhishTank and OpenPhish)
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt",                  // AdAway Default Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt",                 // 1Hosts (Lite)
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt",                 // AdGuard DNS Popup Hosts filter
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_49.txt",                 // HaGeZi's Ultimate Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt",                 // OISD Blocklist Big
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt",                  // Peter Lowe's Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_69.txt",                 // ShadowWhisperer Tracking List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt",                 // Dandelion Sprout's Anti Push Notifications
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt",                  // Dandelion Sprout's Game Console Adblock List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt",                 // HaGeZi's Allowlist Referral
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt",                 // HaGeZi's Apple Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_47.txt",                 // HaGeZi's Gambling Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_66.txt",                 // HaGeZi's OPPO & Realme Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt",                 // Malicious URL Blocklist (URLHaus)
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_61.txt",                 // HaGeZi's Samsung Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt",                 // uBlock₀ filters – Badware risks
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt",                  // The Big List of Hacked Malware Web Sites
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt",                 // Stalkerware Indicators List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt",                 // ShadowWhisperer's Malware List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt",                 // Scam Blocklist by DurableNapkin
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_65.txt",                 // HaGeZi's Vivo Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt",                 // Phishing Army
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt",                 // HaGeZi's Windows/Office Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_60.txt",                 // HaGeZi's Xiaomi Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt",                  // NoCoin Filter List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt",                  // Perflyst and Dandelion Sprout's Smart-TV Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_44.txt",                 // HaGeZi's Threat Intelligence Feeds
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_56.txt",                 // HaGeZi's The World's Most Abused TLDs
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_57.txt",                 // ShadowWhisperer's Dating List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_54.txt",                 // HaGeZi's DynDNS Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_71.txt",                 // HaGeZi's DNS Rebind Protection
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_55.txt",                 // HaGeZi's Badware Hoster Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt",                 // CHN: anti-AD
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt",                 // Dandelion Sprout's Anti-Malware List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt",                 // Phishing URL Blocklist (PhishTank and OpenPhish)
 }
 
 // -----------------------------------------------------------------------------
@@ -87,14 +78,19 @@ var strictIPRegex = regexp.MustCompile(`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-
 // Global storage
 // 使用 Map 的 Key 进行天然去重
 var (
-	validRules = make(map[string]struct{}) // 存储有效规则 (Set)
-	debugLines = make([]string, 0)         // 存储无效行
-	mutex      sync.Mutex                  // 保护上述两个容器的并发写入
+	validRules     = make(map[string]struct{}) // 存储有效规则 (Set)
+	debugLines     = make([]string, 0)         // 存储无效行
+	invalidDomains = make(map[string]struct{}) // 无效域名 Set
+	mutex          sync.Mutex                  // 保护上述两个容器的并发写入
 )
 
 func main() {
 	start := time.Now()
 	fmt.Println(">>> 开始执行 AdGuard 规则清洗任务...")
+
+	// 加载无效域名列表
+	invalidDomains = loadInvalidDomains(InvalidDomainsSource)
+	fmt.Printf(">>> 加载无效域名: %d 条\n", len(invalidDomains))
 
 	// 1. 并发下载所有源
 	var wg sync.WaitGroup
@@ -171,6 +167,15 @@ func processURL(url string) {
 		cleaned, isDebug := normalizeLine(line)
 
 		if cleaned != "" {
+			// 检查是否需要排除 (无效域名)
+			domain := extractDomain(cleaned)
+			//使用 _, found := map[key] 检查 key 是否存在
+			if domain != "" {
+				if _, found := invalidDomains[domain]; found {
+					// 直接排除，不计入 Debug
+					continue
+				}
+			}
 			localRules = append(localRules, cleaned)
 		} else if isDebug {
 			localDebug = append(localDebug, fmt.Sprintf("[%s] %s", url, line)) // 记录来源
@@ -249,6 +254,61 @@ func normalizeLine(line string) (string, bool) {
 
 	// 6. 兜底：所有未命中上述白名单的行，全部视为 Debug
 	return "", true
+}
+
+// loadInvalidDomains 加载无效域名列表，支持本地文件或 URL
+func loadInvalidDomains(source string) map[string]struct{} {
+	set := make(map[string]struct{})
+	var scanner *bufio.Scanner
+
+	if strings.HasPrefix(strings.ToLower(source), "http://") || strings.HasPrefix(strings.ToLower(source), "https://") {
+		// 从 URL 下载
+		client := &http.Client{Timeout: 30 * time.Second}
+		resp, err := client.Get(source)
+		if err != nil {
+			fmt.Printf("!!! 加载无效域名失败 (URL: %s): %v\n", source, err)
+			return set
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != 200 {
+			fmt.Printf("!!! HTTP 错误加载无效域名 (URL: %s): %d\n", source, resp.StatusCode)
+			return set
+		}
+		scanner = bufio.NewScanner(resp.Body)
+	} else {
+		// 本地文件
+		f, err := os.Open(source)
+		if err != nil {
+			fmt.Printf("!!! 打开无效域名文件失败 (%s): %v\n", source, err)
+			return set
+		}
+		defer f.Close()
+		scanner = bufio.NewScanner(f)
+	}
+
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
+			continue
+		}
+		domain := strings.ToLower(line)
+		if strictDomainRegex.MatchString(domain) {
+			set[domain] = struct{}{}
+		}
+	}
+	return set
+}
+
+// extractDomain 从简单规则中提取域名 (仅针对 ||domain^ 格式)
+func extractDomain(rule string) string {
+	ruleLower := strings.ToLower(rule)
+	if strings.HasPrefix(ruleLower, "||") && strings.HasSuffix(ruleLower, "^") {
+		domain := strings.TrimSuffix(strings.TrimPrefix(ruleLower, "||"), "^")
+		if strictDomainRegex.MatchString(domain) {
+			return domain
+		}
+	}
+	return ""
 }
 
 // -----------------------------------------------------------------------------
