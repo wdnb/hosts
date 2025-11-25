@@ -13,6 +13,7 @@ jobs:
     
     steps:
       # 1. 检出代码
+      # 默认检出 main 分支
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -27,28 +28,38 @@ jobs:
         run: |
           go build -o adblock-aggregator main.go
           ./adblock-aggregator
-          # 运行后将生成 adblock_aggr_optimized.txt 文件
+          # 运行后将生成 adblock_aggr_optimized.txt 和 adblock_debug_unrecognized.txt 文件
 
-      # 4. 提交更改回仓库 <--- **这个步骤必须正确缩进在 steps 下**
-      - name: Commit and Push new list
+      # 4. 提交更改到 dist 分支
+      - name: Commit and Push new list to dist branch
         run: |
           # 1. 配置 Git 用户信息
           git config --global user.name 'github-actions[bot]'
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
-          # 2. 强制追踪并添加新生成的文件
+          # 2. 检查 dist 分支是否存在，如果不存在则创建（可选，但更健壮）
+          # 这确保了即使是第一次运行，也能创建 dist 分支
+          git fetch origin dist:dist || git checkout --orphan dist
+          
+          # 3. 切换到 dist 分支（如果不在 dist 上，或者刚刚创建）
+          git checkout dist
+
+          # 4. 从 main 分支复制文件过来
+          # 确保这两个文件是最新生成的
+          # 如果它们是在工作区生成的，可以直接添加。
+          # 假设它们生成在工作区的根目录下：
           git add -f adblock_aggr_optimized.txt adblock_debug_unrecognized.txt
           
-          # 3. 检查是否有实际的更改（防止空提交）
+          # 5. 检查是否有实际的更改（防止空提交）
           if ! git diff --cached --exit-code --quiet; then
-              echo "发现 adblock_aggr_optimized.txt 存在更改，开始提交..."
+              echo "发现新列表存在更改，开始提交到 dist 分支..."
               
-              # 4. 提交更改
+              # 6. 提交更改
               git commit -m "🤖 Feat: Update aggregated adblock list (Daily Run)"
               
-              # 5. 推送更改到 GitHub
-              # 使用 GITHUB_TOKEN 认证进行推送
-              git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
+              # 7. 推送更改到 GitHub 的 dist 分支
+              # 明确指定推送目标分支为 dist
+              git push origin dist
           else
-              echo "文件 adblock_aggr_optimized.txt 内容与上次提交相同，跳过提交。"
+              echo "文件内容与上次提交到 dist 分支的内容相同，跳过提交。"
           fi
