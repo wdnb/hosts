@@ -20,7 +20,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.22' 
+          go-version: '1.24.0' 
 
       # 3. 构建并运行 Go 程序
       - name: Build and Run Go Program
@@ -37,7 +37,7 @@ jobs:
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
           # 2. 强制追踪并添加新生成的文件
-          git add -f adblock_aggr_optimized.txt
+          git add -f adblock_aggr_optimized.txt adblock_debug_unrecognized.txt
           
           # 3. 检查是否有实际的更改（防止空提交）
           if ! git diff --cached --exit-code --quiet; then

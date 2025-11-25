@@ -2,369 +2,261 @@ package main
 
 import (
 	"bufio"
-	"encoding/json"
 	"fmt"
-	"io"
 	"net/http"
 	"os"
 	"regexp"
 	"sort"
 	"strings"
 	"sync"
-	"text/tabwriter"
 	"time"
 )
 
-// ----------------配置区域----------------
+// -----------------------------------------------------------------------------
+// 配置区域
+// -----------------------------------------------------------------------------
 
-// RuleSource 上游规则源
-type RuleSource struct {
-	Name    string // 名称
-	URL     string // 下载地址
-	Enabled bool   // 是否启用
+const (
+	OutputFile = "adblock_aggr_optimized.txt"      // 输出的规则文件
+	DebugFile  = "adblock_debug_unrecognized.txt"  // 被清洗掉的脏数据
+	UserAgent  = "AdGuard-HostlistCompiler-Go/1.0" // 请求头
+)
+
+// Upstreams 上游规则源列表
+// 可以在这里添加任意 URL，程序会自动并发下载
+var Upstreams = []string{
+	"https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockdns.txt", //217heidai
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt",                  // AdGuard DNS filter
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt",  // AdAway Default Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt", // 1Hosts (Lite)
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_70.txt", // 1Hosts (Xtra)
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt", // AdGuard DNS Popup Hosts filter
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_53.txt", // AWAvenue Ads Rule (已移除)
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_4.txt",  // Dan Pollock's List (已移除)
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_34.txt", // HaGeZi's Normal Blocklist
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_48.txt", // HaGeZi's Pro Blocklist
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_51.txt", // HaGeZi's Pro++ Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_49.txt", // HaGeZi's Ultimate Blocklist
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_5.txt",  // OISD Blocklist Small
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt", // OISD Blocklist Big
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt",  // Peter Lowe's Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_69.txt", // ShadowWhisperer Tracking List
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_33.txt", // Steven Black's List (已移除)
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt", // Dandelion Sprout's Anti Push Notifications
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt",  // Dandelion Sprout's Game Console Adblock List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt", // HaGeZi's Allowlist Referral
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt", // HaGeZi's Apple Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_47.txt", // HaGeZi's Gambling Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_66.txt", // HaGeZi's OPPO & Realme Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt", // Malicious URL Blocklist (URLHaus)
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_61.txt", // HaGeZi's Samsung Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt", // uBlock₀ filters – Badware risks
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt",  // The Big List of Hacked Malware Web Sites
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt", // Stalkerware Indicators List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt", // ShadowWhisperer's Malware List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt", // Scam Blocklist by DurableNapkin
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_65.txt", // HaGeZi's Vivo Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt", // Phishing Army
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt", // HaGeZi's Windows/Office Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_60.txt", // HaGeZi's Xiaomi Tracker Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt",  // NoCoin Filter List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt",  // Perflyst and Dandelion Sprout's Smart-TV Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_44.txt", // HaGeZi's Threat Intelligence Feeds
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_56.txt", // HaGeZi's The World's Most Abused TLDs
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_57.txt", // ShadowWhisperer's Dating List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_54.txt", // HaGeZi's DynDNS Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_71.txt", // HaGeZi's DNS Rebind Protection
+	// "https://adguardteam.github.io/HostlistsRegistry/assets/filter_29.txt", // CHN: AdRules DNS List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_55.txt", // HaGeZi's Badware Hoster Blocklist
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt", // CHN: anti-AD
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt", // Dandelion Sprout's Anti-Malware List
+	"https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt", // Phishing URL Blocklist (PhishTank and OpenPhish)
 }
 
-// Upstreams 在此配置你要聚合的上游规则（建议先全部打开测试重复率）
-var Upstreams = []RuleSource{
-	// --- 综合类巨型列表（合并原有 & AdGuard Home 注册中心） ---
-	{Name: "HaGeZi Ultimate", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_49.txt", Enabled: true},
-	{Name: "OISD Big", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt", Enabled: true},
-	{Name: "1Hosts Lite", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt", Enabled: true},
+// -----------------------------------------------------------------------------
+// 正则与核心逻辑
+// -----------------------------------------------------------------------------
 
-	// --- 安全/恶意软件/跟踪（强烈建议保留） ---
-	{Name: "Phishing Army", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt", Enabled: true},
-	{Name: "Stalkerware", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt", Enabled: true},
-	{Name: "Malicious URL Blocklist (URLHaus)", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt", Enabled: true},
-	{Name: "Dandelion Sprout's Anti-Malware List", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt", Enabled: true},
+// strictDomainRegex: 严格的域名白名单正则 (RFC 1035)
+// 用于判断一行文本是否为“纯域名”。必须包含至少一个点，且后缀至少2位字母。
+var strictDomainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z]{2,}$`)
 
-	// --- 中文特化（保留原有） ---
-	{Name: "217heidai", URL: "https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockdns.txt", Enabled: true},
+// strictIPRegex: 简单的 IPv4 校验，用于将纯 IP 转换为 AdGuard 格式
+var strictIPRegex = regexp.MustCompile(`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
 
-	// --- 其他特定领域（合并原有 & AdGuard Home 注册中心） ---
-	{Name: "NoCoin", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt", Enabled: true},
-	{Name: "Perflyst and Dandelion Sprout's Smart-TV Blocklist", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt", Enabled: true},
-	{Name: "Dandelion Sprout's Game Console Adblock List", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt", Enabled: true},
-	{Name: "HaGeZi's Windows/Office Tracker Blocklist", URL: "https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt", Enabled: true},
-}
-
-const OutputFile = "adblock_aggr_optimized.txt" // 最终输出文件
-const CacheDir = "./cache/"                     // 缓存目录
-
-// ----------------核心数据结构----------------
-
-type SourceData struct {
-	Name    string
-	Domains map[string]struct{}
-	Error   error
-}
-
-// 缓存元数据（支持 ETag、Last-Modified 和缓存时间）
-type CacheMetadata struct {
-	ETag         string    `json:"etag"`
-	LastModified string    `json:"last_modified"`
-	FetchedAt    time.Time `json:"fetched_at"` // 缓存时间，用于强制过期
-}
-
-const CacheMetaFile = ".meta" // 元数据文件后缀
-
-// 域名合法性正则（严格符合 RFC 规范）
-var domainRegex = regexp.MustCompile(`^(?i)[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?)*\.[a-z]{2,}$`)
+// Global storage
+// 使用 Map 的 Key 进行天然去重
+var (
+	validRules = make(map[string]struct{}) // 存储有效规则 (Set)
+	debugLines = make([]string, 0)         // 存储无效行
+	mutex      sync.Mutex                  // 保护上述两个容器的并发写入
+)
 
 func main() {
 	start := time.Now()
-	fmt.Println("开始并行下载与聚合规则...")
+	fmt.Println(">>> 开始执行 AdGuard 规则清洗任务...")
 
-	if err := os.MkdirAll(CacheDir, 0755); err != nil {
-		fmt.Printf("创建缓存目录失败: %v\n", err)
-		return
-	}
-
-	results := fetchAll(Upstreams)
-
-	// 全局去重
-	globalSet := make(map[string]struct{})
-	for _, res := range results {
-		if res.Error != nil {
-			continue
-		}
-		for domain := range res.Domains {
-			globalSet[domain] = struct{}{}
-		}
-	}
-
-	// 重复率分析
-	analyzeRedundancy(results, globalSet)
-
-	// 写入最终文件
-	fmt.Printf("\n正在写入最终规则文件 %s（共 %d 条）...\n", OutputFile, len(globalSet))
-	if err := writeToFileAtomic(globalSet, results); err != nil {
-		fmt.Printf("写入失败: %v\n", err)
-	} else {
-		fmt.Printf("完成！总耗时：%v\n", time.Since(start))
-	}
-}
-
-// ----------------重复率分析----------------
-func analyzeRedundancy(results []SourceData, globalSet map[string]struct{}) {
-	fmt.Println("\n规则重合度与贡献度分析报告")
-	fmt.Println(strings.Repeat("=", 90))
-
-	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
-	fmt.Fprintln(w, "源名称\t总规则数\t独有规则数\t重复率\t备注")
-	fmt.Fprintln(w, "----\t----\t----\t----\t----")
-
-	failed := 0
-	for _, cur := range results {
-
-		if cur.Error != nil {
-			if strings.Contains(cur.Error.Error(), "禁用") {
-				fmt.Fprintf(w, "%s\t已禁用\t-\t-\t\n", cur.Name)
-			} else {
-				fmt.Fprintf(w, "%s\t下载失败\t-\t-\t\n", cur.Name)
-			}
-			failed++
-			continue
-		}
-
-		// 其他源的联合集
-		others := make(map[string]struct{})
-		for _, other := range results {
-			if other.Name == cur.Name || other.Error != nil {
-				continue
-			}
-			for d := range other.Domains {
-				others[d] = struct{}{}
-			}
-		}
-
-		unique := 0
-		for d := range cur.Domains {
-			if _, ok := others[d]; !ok {
-				unique++
-			}
-		}
-
-		total := len(cur.Domains)
-		repeatRate := 0.0
-		if total > 0 {
-			repeatRate = 100.0 * float64(total-unique) / float64(total)
-		}
-
-		hint := ""
-		if repeatRate > 95 {
-			hint = "高度冗余，可考虑关闭"
-		} else if repeatRate > 80 {
-			hint = "重复较多"
-		}
-
-		fmt.Fprintf(w, "%s\t%d\t%d\t%.2f%%\t%s\n", cur.Name, total, unique, repeatRate, hint)
-	}
-	w.Flush()
-
-	if failed > 0 {
-		fmt.Printf("\n注意：有 %d 个源下载失败，分析结果可能不完整\n", failed)
-	}
-	fmt.Println(strings.Repeat("=", 90))
-	fmt.Println("提示：独有规则越少，说明该源越可以被其他源替代")
-}
-
-// ----------------并发下载（带缓存 + 重试 + 过期）----------------
-func fetchAll(sources []RuleSource) []SourceData {
+	// 1. 并发下载所有源
 	var wg sync.WaitGroup
-	results := make([]SourceData, len(sources))
-
-	for i, src := range sources {
-		if !src.Enabled {
-			results[i] = SourceData{Name: src.Name, Error: fmt.Errorf("已禁用")}
-			continue
-		}
-
+	for _, url := range Upstreams {
 		wg.Add(1)
-		go func(idx int, s RuleSource) {
+		go func(u string) {
 			defer wg.Done()
-			domains, err := fetchWithCacheAndRetry(s)
-			results[idx] = SourceData{Name: s.Name, Domains: domains, Error: err}
-
-			if err != nil {
-				fmt.Printf("[%s] 下载失败: %v\n", s.Name, err)
-			} else {
-				fmt.Printf("[%s] 完成，解析出 %d 条规则\n", s.Name, len(domains))
-			}
-		}(i, src)
+			processURL(u)
+		}(url)
 	}
 	wg.Wait()
-	return results
+
+	fmt.Printf(">>> 下载与清洗完成。有效规则: %d, 脏数据: %d\n", len(validRules), len(debugLines))
+	fmt.Println(">>> 正在排序并写入文件...")
+
+	// 2. 转换为切片以便排序
+	finalRules := make([]string, 0, len(validRules))
+	for rule := range validRules {
+		finalRules = append(finalRules, rule)
+	}
+	sort.Strings(finalRules) // 字典序排序
+
+	// 3. 写入最终结果
+	if err := writeSliceToFile(OutputFile, finalRules, true); err != nil {
+		fmt.Printf("!!! 写入结果文件失败: %v\n", err)
+	} else {
+		fmt.Printf(">>> 成功生成: %s\n", OutputFile)
+	}
+
+	// 4. 写入 Debug 文件 (如果有)
+	if len(debugLines) > 0 {
+		sort.Strings(debugLines)
+		if err := writeSliceToFile(DebugFile, debugLines, false); err != nil {
+			fmt.Printf("!!! 写入Debug文件失败: %v\n", err)
+		} else {
+			fmt.Printf(">>> 脏数据已备份至: %s\n", DebugFile)
+		}
+	}
+
+	fmt.Printf(">>> 全部完成，总耗时: %v\n", time.Since(start))
 }
 
-// 核心下载函数：支持缓存、304、24小时强制过期、3次重试
-func fetchWithCacheAndRetry(src RuleSource) (map[string]struct{}, error) {
-	cacheFile := CacheDir + strings.ReplaceAll(src.Name, " ", "_") + ".txt"
-	metaFile := CacheDir + strings.ReplaceAll(src.Name, " ", "_") + CacheMetaFile
+// -----------------------------------------------------------------------------
+// 处理逻辑
+// -----------------------------------------------------------------------------
 
-	// 读取元数据
-	var meta CacheMetadata
-	if data, err := os.ReadFile(metaFile); err == nil {
-		if json.Unmarshal(data, &meta) != nil {
-			meta = CacheMetadata{} // 元数据损坏则忽略
-		}
-	}
+func processURL(url string) {
+	fmt.Printf("正在下载: %s\n", url)
 
-	// 如果缓存不到24小时且文件存在，可直接使用（跳过请求）
-	if !meta.FetchedAt.IsZero() && time.Since(meta.FetchedAt) < 24*time.Hour {
-		if _, err := os.Stat(cacheFile); err == nil {
-			fmt.Printf("[%s] 使用近期缓存（%v前）\n", src.Name, time.Since(meta.FetchedAt).Round(time.Minute))
-			return parseFromFile(cacheFile)
-		}
-	}
+	client := &http.Client{Timeout: 30 * time.Second}
+	req, _ := http.NewRequest("GET", url, nil)
+	req.Header.Set("User-Agent", UserAgent)
 
-	// 带重试的下载
-	var resp *http.Response
-	var err error
-	for attempt := 1; attempt <= 3; attempt++ {
-		resp, err = doConditionalRequest(src.URL, meta)
-		if err == nil {
-			break
-		}
-		if attempt < 3 {
-			time.Sleep(time.Second * time.Duration(attempt))
-		}
-	}
-
+	resp, err := client.Do(req)
 	if err != nil {
-		// 所有重试失败，尝试用旧缓存
-		if _, statErr := os.Stat(cacheFile); statErr == nil {
-			fmt.Printf("[%s] 下载失败，使用旧缓存\n", src.Name)
-			return parseFromFile(cacheFile)
-		}
-		return nil, err
+		fmt.Printf("!!! 下载失败 [%s]: %v\n", url, err)
+		return
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode == http.StatusNotModified {
-		fmt.Printf("[%s] 未更新（304），使用缓存\n", src.Name)
-		return parseFromFile(cacheFile)
+	if resp.StatusCode != 200 {
+		fmt.Printf("!!! HTTP 错误 [%s]: %d\n", url, resp.StatusCode)
+		return
 	}
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
-	// 更新缓存与元数据
-	if err := saveResponseToCache(resp, cacheFile, metaFile); err != nil {
-		return nil, err
-	}
-	return parseFromFile(cacheFile)
-}
-
-func doConditionalRequest(url string, meta CacheMetadata) (*http.Response, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, _ := http.NewRequest("GET", url, nil)
-	if meta.ETag != "" {
-		req.Header.Set("If-None-Match", meta.ETag)
-	}
-	if meta.LastModified != "" {
-		req.Header.Set("If-Modified-Since", meta.LastModified)
-	}
-	return client.Do(req)
-}
-
-func saveResponseToCache(resp *http.Response, cacheFile, metaFile string) error {
-	// 保存新内容
-	f, err := os.Create(cacheFile)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	if _, err := io.Copy(f, resp.Body); err != nil {
-		return err
-	}
-
-	// 更新元数据
-	newMeta := CacheMetadata{
-		ETag:         resp.Header.Get("ETag"),
-		LastModified: resp.Header.Get("Last-Modified"),
-		FetchedAt:    time.Now(),
-	}
-	data, _ := json.MarshalIndent(newMeta, "", "  ")
-	return os.WriteFile(metaFile, data, 0644)
-}
-
-// ----------------解析规则----------------
-func parseFromFile(path string) (map[string]struct{}, error) {
-	f, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	info, _ := f.Stat()
-	if info.Size() > 200*1024*1024 { // 限制 200MB 防止爆内存
-		return nil, fmt.Errorf("文件过大：%s", path)
-	}
-
-	domains := make(map[string]struct{}, 500_000) // 预分配容量
-	scanner := bufio.NewScanner(f)
-	buf := make([]byte, 0, 1024*1024)
-	scanner.Buffer(buf, 10*1024*1024) // 最大行长 10MB
+	scanner := bufio.NewScanner(resp.Body)
+	localRules := []string{}
+	localDebug := []string{}
 
 	for scanner.Scan() {
-		if domain := extractDomain(scanner.Text()); domain != "" {
-			domains[domain] = struct{}{}
+		line := strings.TrimSpace(scanner.Text())
+
+		// 核心清洗函数
+		cleaned, isDebug := normalizeLine(line)
+
+		if cleaned != "" {
+			localRules = append(localRules, cleaned)
+		} else if isDebug {
+			localDebug = append(localDebug, fmt.Sprintf("[%s] %s", url, line)) // 记录来源
 		}
 	}
-	return domains, scanner.Err()
+
+	// 批量加锁写入全局存储，减少锁竞争
+	mutex.Lock()
+	for _, r := range localRules {
+		validRules[r] = struct{}{} // Map 自动去重
+	}
+	debugLines = append(debugLines, localDebug...)
+	mutex.Unlock()
 }
 
-// 提取域名，仅保留纯域名规则（严格模式）
-func extractDomain(line string) string {
-	line = strings.TrimSpace(line)
-	if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
-		return ""
+// normalizeLine 核心白名单清洗逻辑
+// 返回: (清洗后的规则, 是否为脏数据)
+func normalizeLine(line string) (string, bool) {
+	// 1. 空行与注释：直接丢弃，不算 Debug
+	if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "[") {
+		return "", false
 	}
 
-	// 去除行尾注释
-	if i := strings.IndexAny(line, "#!"); i >= 0 {
-		line = strings.TrimSpace(line[:i])
+	// 2. 显式脏数据拦截 (Blacklist Check)
+	// 拦截 broken URLs (e.g., "://ww4.")
+	if strings.HasPrefix(line, "://") {
+		return "", true
+	}
+	// 拦截 HTML 标签
+	if strings.HasPrefix(line, "<") {
+		return "", true
 	}
 
-	// 已经是 AdGuard 格式 ||domain^
-	if strings.HasPrefix(line, "||") && strings.HasSuffix(line, "^") {
-		domain := strings.TrimPrefix(line, "||")
-		domain = strings.TrimSuffix(domain, "^")
-		if domainRegex.MatchString(domain) {
-			return strings.ToLower(domain)
+	// 3. AdGuard 标准格式白名单 (Whitelist Check - AdGuard Native)
+	// 如果行以这些符号开头，我们假设它是合法的 AdGuard 规则，予以保留。
+	// || = 域名拦截, @@ = 白名单, | = 锚点, / = 正则
+	if strings.HasPrefix(line, "||") || strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "|") || strings.HasPrefix(line, "/") {
+		// 再次检查是否包含明显错误（如空格），但 AdGuard 修饰符中可能包含空格吗？
+		// 严格来说，AdGuard 规则体中间不应有空格，除非是在 Regex 或特定的 value 中。
+		// 为了 KISS，我们信任以这些符号开头的行，除非它非常短。
+		if len(line) < 3 {
+			return "", true
 		}
-		return ""
+		return line, false
 	}
 
-	// hosts 格式
+	lineLower := strings.ToLower(line)
+
+	// 4. Hosts 格式转换 (Whitelist Check - Hosts)
+	// 匹配 "0.0.0.0 domain.com" 或 "127.0.0.1 domain.com"
 	if strings.HasPrefix(line, "0.0.0.0 ") || strings.HasPrefix(line, "127.0.0.1 ") {
-		parts := strings.Fields(line)
+		parts := strings.Fields(lineLower)
 		if len(parts) >= 2 {
-			line = parts[1]
+			domain := parts[1]
+			// 排除 localhost
+			if domain == "localhost" || domain == "local" || domain == "0.0.0.0" || domain == "127.0.0.1" {
+				return "", false
+			}
+			// 验证提取的部分是否真的是域名
+			if strictDomainRegex.MatchString(domain) {
+				return "||" + domain + "^", false
+			}
 		}
+		// 是Hosts格式但域名无效 -> Debug
+		return "", true
 	}
 
-	// 去除 	 常见修饰符
-	line = strings.TrimPrefix(line, "||")
-	if i := strings.Index(line, "^"); i >= 0 {
-		line = line[:i]
+	// 5. 纯域名/IP 格式转换 (Whitelist Check - Pure Domain/IP)
+	// 必须严格匹配域名正则，防止误判
+	if strictDomainRegex.MatchString(lineLower) {
+		return "||" + lineLower + "^", false
 	}
-	if strings.ContainsAny(line, "/:*[]") { // 复杂规则直接丢弃
-		return ""
+	if strictIPRegex.MatchString(lineLower) {
+		return "||" + lineLower + "^", false
 	}
 
-	domain := strings.ToLower(strings.TrimSpace(line))
-	if domainRegex.MatchString(domain) {
-		return domain
-	}
-	return ""
+	// 6. 兜底：所有未命中上述白名单的行，全部视为 Debug
+	return "", true
 }
 
-// ----------------原子写入最终文件----------------
-func writeToFileAtomic(domains map[string]struct{}, sources []SourceData) error {
-	tmpFile := OutputFile + ".tmp"
-	f, err := os.Create(tmpFile)
+// -----------------------------------------------------------------------------
+// 辅助工具
+// -----------------------------------------------------------------------------
+
+func writeSliceToFile(filename string, lines []string, isResult bool) error {
+	f, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
@@ -372,37 +264,20 @@ func writeToFileAtomic(domains map[string]struct{}, sources []SourceData) error 
 
 	w := bufio.NewWriter(f)
 
-	// Header
-	fmt.Fprintln(w, "!")
-	fmt.Fprintln(w, "! Title: 优化聚合广告拦截列表")
-	fmt.Fprintf(w, "! 更新时间: %s\n", time.Now().Format("2006-01-02 15:04:05 MST"))
-	fmt.Fprintf(w, "! 总规则数: %d\n", len(domains))
-	fmt.Fprintln(w, "! 来源:")
-	for _, s := range sources {
-		if s.Error == nil {
-			fmt.Fprintf(w, "!   - %s\n", s.Name)
-		}
-	}
-	fmt.Fprintln(w, "!")
-
-	// 排序输出
-	list := make([]string, 0, len(domains))
-	for d := range domains {
-		list = append(list, d)
-	}
-	sort.Strings(list)
-
-	for _, d := range list {
-		fmt.Fprintf(w, "||%s^\n", d)
+	if isResult {
+		// 写入 AdGuard 头部信息
+		fmt.Fprintln(w, "! Title: Optimized AdGuard Home Blocklist")
+		fmt.Fprintf(w, "! Updated: %s\n", time.Now().Format(time.RFC3339))
+		fmt.Fprintf(w, "! Total count: %d\n", len(lines))
+		fmt.Fprintln(w, "!")
+	} else {
+		fmt.Fprintln(w, "# Debug: Unrecognized lines / Dirty data")
+		fmt.Fprintf(w, "# Generated: %s\n", time.Now().Format(time.RFC3339))
 	}
 
-	if err := w.Flush(); err != nil {
-		os.Remove(tmpFile)
-		return err
+	for _, line := range lines {
+		fmt.Fprintln(w, line)
 	}
-	if err := f.Close(); err != nil {
-		os.Remove(tmpFile)
-		return err
-	}
-	return os.Rename(tmpFile, OutputFile)
+
+	return w.Flush()
 }
