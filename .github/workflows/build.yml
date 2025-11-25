@@ -1,5 +1,6 @@
 name: AdBlock List Aggregator
 
+# 1. 设置触发器: 每天定时运行一次
 on:
   schedule:
     - cron: '0 0 * * *'
@@ -11,10 +12,9 @@ jobs:
     runs-on: ubuntu-latest
     
     steps:
-      # 1. 检出 main 分支
+      # 1. 检出代码
       - name: Checkout repository
         uses: actions/checkout@v4
-        # 保持在 main 分支
 
       # 2. 设置 Go 环境
       - name: Set up Go
@@ -27,29 +27,28 @@ jobs:
         run: |
           go build -o adblock-aggregator main.go
           ./adblock-aggregator
-          # 生成 adblock_aggr_optimized.txt 和 adblock_debug_unrecognized.txt
+          # 运行后将生成 adblock_aggr_optimized.txt 文件
 
-   # 4. 提交更改到 dist 分支
-      - name: Commit and Push new list to dist
+      # 4. 提交更改回仓库
+      - name: Commit and Push new list
         run: |
           # 1. 配置 Git 用户信息
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git config --global user.name 'github-actions[bot]'
+          git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
           # 2. 强制追踪并添加新生成的文件
           git add -f adblock_aggr_optimized.txt adblock_debug_unrecognized.txt
           
-          # 3. 检查是否有实际的更改
+          # 3. 检查是否有实际的更改（防止空提交）
           if ! git diff --cached --exit-code --quiet; then
-              echo "发现文件存在更改，开始提交并推送到 dist 分支..."
+              echo "发现 adblock_aggr_optimized.txt 存在更改，开始提交..."
               
               # 4. 提交更改
               git commit -m "🤖 Feat: Update aggregated adblock list (Daily Run)"
               
-              # 5. 强制推送当前最新的提交到 'dist' 分支
-              # "+HEAD:dist" 表示将当前的 HEAD (包含新文件的提交) 强制推送到远程的 dist 分支
-              # 使用这种格式不需要 ${{ secrets.GITHUB_TOKEN }} 在 URL 中
-              git push origin +HEAD:dist
+              # 5. 推送更改到 GitHub
+              # 使用 GITHUB_TOKEN 认证进行推送
+              git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           else
-              echo "文件内容与上次提交相同，跳过提交。"
+              echo "文件 adblock_aggr_optimized.txt 内容与上次提交相同，跳过提交。"
           fi
