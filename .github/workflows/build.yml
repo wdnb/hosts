@@ -29,7 +29,7 @@ jobs:
           ./adblock-aggregator
           # 生成 adblock_aggr_optimized.txt 和 adblock_debug_unrecognized.txt
 
-      # 4. 提交更改到 dist 分支 (KISS 原则优化)
+   # 4. 提交更改到 dist 分支
       - name: Commit and Push new list to dist
         run: |
           # 1. 配置 Git 用户信息
@@ -39,20 +39,17 @@ jobs:
           # 2. 强制追踪并添加新生成的文件
           git add -f adblock_aggr_optimized.txt adblock_debug_unrecognized.txt
           
-          # 3. 检查是否有实际的更改（防止空提交）
+          # 3. 检查是否有实际的更改
           if ! git diff --cached --exit-code --quiet; then
               echo "发现文件存在更改，开始提交并推送到 dist 分支..."
               
-              # 4. 提交更改到工作区的暂存区
+              # 4. 提交更改
               git commit -m "🤖 Feat: Update aggregated adblock list (Daily Run)"
               
-              # 5. 推送当前最新的提交到 'dist' 分支
-              # 这里的 HEAD 指的是上一步创建的提交。
-              # 强制推送 (+HEAD) 是因为 dist 分支的历史记录可能会与 main 分支的提交历史脱离，
-              # 但这确保了 dist 分支始终是最新的构建结果。
-              git push origin HEAD:dist
-              
-              # 注意：这里使用了简化的 git push 语法，利用了 GitHub Actions 的 GITHUB_TOKEN 权限。
+              # 5. 强制推送当前最新的提交到 'dist' 分支
+              # "+HEAD:dist" 表示将当前的 HEAD (包含新文件的提交) 强制推送到远程的 dist 分支
+              # 使用这种格式不需要 ${{ secrets.GITHUB_TOKEN }} 在 URL 中
+              git push origin +HEAD:dist
           else
               echo "文件内容与上次提交相同，跳过提交。"
           fi
