@@ -17,10 +17,10 @@ import (
 // -----------------------------------------------------------------------------
 
 const (
-	OutputFile           = "adblock_aggr_optimized.txt"      // 输出的规则文件
-	DebugFile            = "adblock_debug_unrecognized.txt"  // 被清洗掉的脏数据
-	UserAgent            = "AdGuard-HostlistCompiler-Go/1.0" // 请求头
-	InvalidDomainsSource = "invalid_domains.txt"             // 可以是本地路径或 GitHub URL (e.g., "https://raw.githubusercontent.com/user/repo/main/invalid_domains.txt")
+	OutputFile           = "adblock_aggr_optimized.txt"                                                       // 输出的规则文件
+	DebugFile            = "adblock_debug_unrecognized.txt"                                                   // 被清洗掉的脏数据
+	UserAgent            = "AdGuard-HostlistCompiler-Go/1.0"                                                  // 请求头
+	InvalidDomainsSource = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/dist/invalid_domains.txt" // 可以是本地路径或 GitHub URL (e.g., "https://raw.githubusercontent.com/user/repo/main/invalid_domains.txt")
 )
 
 // Upstreams 上游规则源列表
