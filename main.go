@@ -254,8 +254,8 @@ func normalizeLine(line string) (string, bool) {
 	// 统一移除尾部 '^' (如果存在)
 	pattern := strings.TrimSuffix(line, "^")
 
-	// 移除前导 '.' 或 '-'
-	pattern = strings.TrimLeft(pattern, ".-")
+	// 移除前导 '.' 或 '-'或 '*'
+	pattern = strings.TrimLeft(pattern, ".-*")
 
 	if pattern == "" {
 		return "", true // 空，标记未识别
@@ -287,15 +287,17 @@ func normalizeLine(line string) (string, bool) {
 	if err == nil {
 		return "||" + normalized + "^" + modifiers, false
 	}
-	if ip := net.ParseIP(pattern); ip != nil {
-		return "||" + pattern + "^" + modifiers, false
+	if ip := net.ParseIP(pattern); ip != nil { //ip不要了
+		return origLine, true
+		// return "||" + pattern + "^" + modifiers, false
 	}
 
 	// 非标准规则: 尝试作为域名处理 (宽松，支持 _ 等)
 	if strings.ContainsAny(pattern, "abcdefghijklmnopqrstuvwxyz0123456789-._:") && !strings.ContainsAny(pattern, "!@#%&()=[]{}\\|;'\",<>?`~/=*") {
 		normalized, err = idna.ToASCII(pattern) // 尝试 punycode 转换
 		if err == nil && normalized != "" {
-			return "||" + normalized + "^" + modifiers, false
+			return origLine, true
+			// return "||" + normalized + "^" + modifiers, false
 		}
 	}
 
