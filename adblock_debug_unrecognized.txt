@@ -1,12 +1,53 @@
 # Debug: Unrecognized lines / Dirty data
-# Generated: 2025-11-26T05:20:22Z
+# Generated: 2025-11-26T06:43:51Z
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .avito.www.booking.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .com-id*.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .com-id*.info^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *-factoryoutlet.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *-outletfactory.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *austrailasale.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *butikksoslo.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *danmarkdk.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *danmarks.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *factoryoutletcanada.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *factoryoutletsg.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *factoryoutletsuk.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *factoryoutletuk.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *greeceoutlet.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *gummistovlar.com.se^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norge-no.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norge-salg.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norgebutikk.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norges.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norgesalg.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norgesalgs.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norgestore.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norgestores.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *norgno.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *outletsfactory.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *outletsverige.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *outletuk.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *salgnorge.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *shoesoutletonline.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *shoesoutletstores.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *shoeuksale.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *skobutikks.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *skodanmarks.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *skodktilbud.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *skonorgeeu.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *skorrea.com.se^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *sneakersdkshop.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *sneakersnorgeshop.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] *usafactoryoutlet.com^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] -norgesalg.com^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] -outletcanada.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] -trk.xyz^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] .advancedhosters.com^$denyallow=mirror.advancedhosters.com|www.advancedhosters.com
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] .avito.www.booking.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] .booking.com-id*
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] .com-id*.info^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] .microsoft.com.chrome.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://193.143.1.*
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://46.148.113.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://46.148.114.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://46.161.31.
@@ -27,9 +68,16 @@
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://cw-trk.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://disordgift.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://flow-clck.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://gimp.download.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://java.download.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ktraks.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://old.sermitsiaq.ag^$denyallow=subdomain_stolen_from_sermitsiaqs_owners.*
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://popupblockergold.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://rufus.download.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://soekpakke*.blogspot.com^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://sublimetext.download.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://vidiq.download.
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://virtualbox.download.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ww10.$denyallow=ww10.autotask.net|ww10.pornhoarder.tv|practically_always_leads_to_a_domain_parking_service_known_for_malware.*
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ww11.$denyallow=ww11.autotask.net|ww11.pornhoarder.tv|practically_always_leads_to_a_domain_parking_service_known_for_malware.*
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ww12.$denyallow=ww12.autotask.net|ww12.pornhoarder.tv|practically_always_leads_to_a_domain_parking_service_known_for_malware.*
@@ -76,12 +124,14 @@
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ww6.$denyallow=ww6.generali.pt|ww6.autotask.net|ww6.pornhoarder.org
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ww7.$denyallow=ww7.be|ww7.readsnk.com|ww7.autotask.net|ww7.pornhoarder.tv
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt] ://ww9.$denyallow=ww9.ikea.com|ww9.tiki.ne.jp|ww9.sakura.ne.jp|ww9.generali.pt|ww9.itau.com.br|ww9.autotask.net|ww9.pornhoarder.tv
-[https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt] www.xn--d1aqfkf.xn--p1ai
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt] .vafrike.ru^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt] -ez-pass.com^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt] -ledger.live^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt] -ndax-*.webflow.io^
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt] -sso-*.webflow.io^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt] ://account.booking.xn--
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt] *watson.events.data.microsoft.com^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt] 0.0.0.0 cukiernia_izabela.republika.pl
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt] 0.0.0.0 pp4_09_10_2s.republika.pl
-[https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt] 0.0.0.0 sfdao.ga14pwy4pfrhp8xeqhdbnxkcnl.php?rand=13InboxLightaspxn.1774256418&fid.4.1252899642&fid=1&fav.1&rand.13InboxLight.aspxn.1774256418&fid.1252899642&fid.1&fav.1&email=&emailID=&.rand=13InboxL...
+[https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt] 0.0.0.0 sfdao.ga14pwy4pfrhp8xeqhdbnxkcnl.php?rand=13InboxLightaspxn.1774256418&fid.4.1252899642&fid=1&fav.1&rand.13InboxLight.aspxn.1774256418&fid.1252899642&fid.1&fav.1&email=&emailID=&.rand=13InboxLight.aspx?n=1774256418&fid=4#n=1252899642&fid=1&fav=1
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt] 0.0.0.0 zsz_szyn.republika.pl
