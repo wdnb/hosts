@@ -1,5 +1,5 @@
 # Debug: Unrecognized lines / Dirty data
-# Generated: 2025-11-25T12:20:45Z
+# Generated: 2025-11-26T01:14:02Z
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .avito.www.booking.
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .com-id*.com^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .com-id*.info^
