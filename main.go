@@ -3,13 +3,15 @@ package main
 import (
 	"bufio"
 	"fmt"
+	"net"
 	"net/http"
 	"os"
-	"regexp"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"golang.org/x/net/idna"
 )
 
 // -----------------------------------------------------------------------------
@@ -25,23 +27,10 @@ const (
 	UpstreamListSource = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/main/upstream_list.txt"
 )
 
-// -----------------------------------------------------------------------------
-// 正则与核心逻辑
-// -----------------------------------------------------------------------------
-
-// domainRegex: 域名校验，支持 '_' (兼容 Hosts 文件)，TLD 支持数字和连字符 (兼容 Punycode 如 xn--p1ai)
-var domainRegex = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9_\-]{0,61}[a-zA-Z0-9])?\.)+[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?\.?$`)
-
-// wildcardRegex: 通配符规则校验 (允许 *, ^, 字母数字, 点, 短横线, :, _)
-var wildcardRegex = regexp.MustCompile(`^[a-zA-Z0-9\-\.\*\^\:\_]+$`)
-
-// strictIPRegex: 简单的 IPv4 校验
-var strictIPRegex = regexp.MustCompile(`^(?:(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)\.){3}(?:25[0-5]|2[0-4][0-9]|[01]?[0-9][0-9]?)$`)
-
 // Global storage
 var (
 	validRules     = make(map[string]struct{}) // 存储有效规则 (Set)
-	debugLines     = make([]string, 0)         // 存储无效行
+	debugLines     = make([]string, 0)         // 存储未识别行 (原样收入但需调试)
 	invalidDomains = make(map[string]struct{}) // 无效域名 Set
 	mutex          sync.Mutex                  // 保护上述两个容器的并发写入
 )
@@ -78,7 +67,7 @@ func main() {
 	}
 	wg.Wait()
 
-	fmt.Printf(">>> 下载与清洗完成。有效规则: %d, 脏数据: %d\n", len(validRules), len(debugLines))
+	fmt.Printf(">>> 下载与清洗完成。有效规则: %d, 未识别行: %d\n", len(validRules), len(debugLines))
 	fmt.Println(">>> 正在排序并写入文件...")
 
 	// 4. 转换为切片以便排序
@@ -101,7 +90,7 @@ func main() {
 		if err := writeSliceToFile(DebugFile, debugLines, false); err != nil {
 			fmt.Printf("!!! 写入Debug文件失败: %v\n", err)
 		} else {
-			fmt.Printf(">>> 脏数据已备份至: %s\n", DebugFile)
+			fmt.Printf(">>> 未识别行已备份至: %s\n", DebugFile)
 		}
 	}
 
@@ -176,7 +165,7 @@ func processURL(url string) {
 		line := strings.TrimSpace(scanner.Text())
 
 		// 核心清洗函数
-		cleaned, isDebug := normalizeLine(line)
+		cleaned, isUnrecognized := normalizeLine(line)
 
 		if cleaned != "" {
 			// 检查是否需要排除 (无效域名)
@@ -187,7 +176,8 @@ func processURL(url string) {
 				}
 			}
 			localRules = append(localRules, cleaned)
-		} else if isDebug {
+		}
+		if isUnrecognized {
 			if len(line) > 200 {
 				line = line[:200] + "..."
 			}
@@ -208,9 +198,8 @@ func processURL(url string) {
 	mutex.Unlock()
 }
 
-// normalizeLine: 进一步优化的规则规范化逻辑 (KISS: 线性分支，处理 Punycode、碎片、领先 *，保留原意)
+// normalizeLine: 简化规则规范化逻辑 (KISS: 优先检测 AdGuard 格式，直接收入；Hosts 转换；域名/IP 转换；通配/非标尝试转换；剩余原样 + 标记未识别)
 func normalizeLine(line string) (string, bool) {
-	line = strings.TrimSpace(line)
 	if line == "" {
 		return "", false
 	}
@@ -220,7 +209,10 @@ func normalizeLine(line string) (string, bool) {
 		return "", false
 	}
 
-	// 移除协议前缀
+	origLine := line // 保留原始
+	line = strings.TrimSpace(strings.ToLower(line))
+
+	// 移除协议前缀 (如果有)
 	if strings.HasPrefix(line, "http://") {
 		line = line[7:]
 	} else if strings.HasPrefix(line, "https://") {
@@ -229,78 +221,100 @@ func normalizeLine(line string) (string, bool) {
 		line = line[3:]
 	}
 
-	origLine := line // 保留原始以防需要原样返回
-	line = strings.ToLower(line)
-
-	// 直接放行 AdGuard 标准格式 (最小长度检查)
+	// 直接放行 AdGuard 官方推荐格式 (||, @@, |, / 开头，最小长度 3)
 	if len(line) >= 3 && (strings.HasPrefix(line, "||") || strings.HasPrefix(line, "@@") || strings.HasPrefix(line, "|") || strings.HasPrefix(line, "/")) {
 		return origLine, false
 	}
 
-	// 处理 Hosts 格式
+	// 处理 Hosts 格式 (转换为 AdGuard 格式)
 	if strings.HasPrefix(line, "0.0.0.0 ") || strings.HasPrefix(line, "127.0.0.1 ") {
 		parts := strings.Fields(line)
-		if len(parts) < 2 {
-			return "", true
+		if len(parts) < 2 || strings.ContainsAny(line, "/?=&") {
+			return "", true // 脏数据，标记未识别 (但这里视作未识别，原样? 否，按需求脏数据只debug不收入)
 		}
 		domain := parts[1]
-		// 清理路径和查询参数
-		if idx := strings.IndexAny(domain, "/?"); idx != -1 {
-			domain = domain[:idx]
-		}
 		if domain == "localhost" || domain == "local" || domain == "0.0.0.0" || domain == "127.0.0.1" {
 			return "", false
 		}
-		if domainRegex.MatchString(domain) {
-			return "||" + domain + "^", false
+		normalizedDomain, err := normalizeDomain(domain)
+		if err == nil {
+			return "||" + normalizedDomain + "^", false
 		}
-		return "", true
+		return "", true // 无效 Hosts，标记未识别
 	}
 
 	// 分离修饰符 ($...)
 	modifiers := ""
 	if idx := strings.Index(line, "$"); idx != -1 {
-		modifiers = line[idx:]
+		modifiers = origLine[idx:] // 使用 origLine 以保留大小写
 		line = line[:idx]
+		origLine = origLine[:idx]
 	}
 
-	// 清理尾部 '.' 和 '^'，前导 '.-'
-	pattern := strings.TrimSuffix(line, ".")
-	pattern = strings.TrimSuffix(pattern, "^")
+	// 统一移除尾部 '^' (如果存在)
+	pattern := strings.TrimSuffix(line, "^")
+
+	// 移除前导 '.' 或 '-'
 	pattern = strings.TrimLeft(pattern, ".-")
 
 	if pattern == "" {
-		return "", true
+		return "", true // 空，标记未识别
 	}
 
-	// 处理通配符规则 (遵循原意：去除领先 *，因为 ||*domain^ 等同 ||domain^)
+	// 处理通配符规则 (允许 *，^，:，_ 等；转换为 AdGuard 格式)
 	if strings.Contains(pattern, "*") {
-		if wildcardRegex.MatchString(pattern) {
-			prefix := "||"
-			// 去除领先 * (冗余，等同 subdomain 阻塞)
-			if after, ok := strings.CutPrefix(pattern, "*"); ok {
-				pattern = after
-			}
-			return prefix + pattern + "^" + modifiers, false
+		// 简单校验: 只含允许字符
+		if strings.ContainsAny(pattern, "!@#%&()=[]{}\\|;'\",<>?`~") {
+			return origLine + modifiers, true // 复杂通配，原样 + 未识别
 		}
-		return "", true
+		prefix := "||"
+		origPattern := strings.TrimSuffix(strings.ToLower(origLine), strings.ToLower(modifiers)) // 同步 orig
+		if strings.HasPrefix(pattern, "*") {
+			origPattern = strings.TrimPrefix(origPattern, "*")
+			pattern = strings.TrimPrefix(pattern, "*")
+			prefix = "||*"
+		}
+		// 尝试规范化域名部分
+		normalizedPattern, err := normalizeDomain(pattern)
+		if err == nil {
+			return prefix + normalizedPattern + "^" + modifiers, false
+		}
+		return prefix + origPattern + "^" + modifiers, false // 仍转换，但不保证
 	}
 
-	// 处理纯域名或 IP
-	if domainRegex.MatchString(pattern) {
+	// 处理纯域名或 IP (使用库规范化，支持 punycode 和非标)
+	normalized, err := normalizeDomain(pattern)
+	if err == nil {
+		return "||" + normalized + "^" + modifiers, false
+	}
+	if ip := net.ParseIP(pattern); ip != nil {
 		return "||" + pattern + "^" + modifiers, false
 	}
-	if strictIPRegex.MatchString(pattern) {
-		// 注意：AdGuard Home 不支持直接 IP 阻塞，跳过到 debug (使用防火墙替代)
-		return "", true
+
+	// 非标准规则: 尝试作为域名处理 (宽松，支持 _ 等)
+	if strings.ContainsAny(pattern, "abcdefghijklmnopqrstuvwxyz0123456789-._:") && !strings.ContainsAny(pattern, "!@#%&()=[]{}\\|;'\",<>?`~/=*") {
+		normalized, err = idna.ToASCII(pattern) // 尝试 punycode 转换
+		if err == nil && normalized != "" {
+			return "||" + normalized + "^" + modifiers, false
+		}
 	}
 
-	// 处理域名碎片/前缀 (e.g., ww10 -> ||ww10.*^)
-	if wildcardRegex.MatchString(pattern) && !strings.ContainsAny(pattern, "*/^") {
-		return "||" + pattern + ".*^" + modifiers, false
-	}
+	// 剩余不能匹配的: 原样返回，并标记未识别
+	return origLine, true
+}
 
-	return "", true
+// normalizeDomain: 使用 idna 库处理 punycode 和简单校验 (支持 _ 等非标)
+func normalizeDomain(domain string) (string, error) {
+	// 转换为 Punycode (ASCII)
+	asciiDomain, err := idna.ToASCII(domain)
+	if err != nil {
+		return "", err
+	}
+	// 简单校验: 至少一个 .，字母数字 - _ . 组成，TLD 至少 2 位 (宽松，支持非标)
+	if !strings.Contains(asciiDomain, ".") || len(asciiDomain) < 4 || strings.ContainsAny(asciiDomain, "!@#%&()=[]{}\\|;'\",<>?`~/*:^") {
+		return "", fmt.Errorf("invalid domain")
+	}
+	return asciiDomain, nil
 }
 
 func loadInvalidDomains(source string) map[string]struct{} {
@@ -349,17 +363,21 @@ func extractDomain(rule string) string {
 	if strings.HasPrefix(ruleLower, "||") && strings.HasSuffix(ruleLower, "^") {
 		domain := strings.TrimSuffix(strings.TrimPrefix(ruleLower, "||"), "^")
 		if strings.Contains(domain, "*") {
-			// 对于通配符规则，提取不带 * 的纯域名部分进行检查
+			// 对于通配符，提取不带 * 的纯域名部分
 			trimmedDomain := strings.TrimPrefix(domain, "*")
-			if !strings.Contains(trimmedDomain, "*") && domainRegex.MatchString(trimmedDomain) {
-				return trimmedDomain
+			if !strings.Contains(trimmedDomain, "*") {
+				_, err := normalizeDomain(trimmedDomain)
+				if err == nil {
+					return trimmedDomain
+				}
 			}
 			return ""
 		}
 		return domain
 	}
 
-	if domainRegex.MatchString(ruleLower) {
+	_, err := normalizeDomain(ruleLower)
+	if err == nil {
 		return ruleLower
 	}
 
@@ -380,7 +398,7 @@ func writeSliceToFile(filename string, lines []string, isResult bool) error {
 		fmt.Fprintf(w, "! Total count: %d\n", len(lines))
 		fmt.Fprintln(w, "!")
 	} else {
-		fmt.Fprintln(w, "# Debug: Unrecognized lines / Dirty data")
+		fmt.Fprintln(w, "# Debug: Unrecognized lines (included as-is in output)")
 		fmt.Fprintf(w, "# Generated: %s\n", time.Now().Format(time.RFC3339))
 	}
 
