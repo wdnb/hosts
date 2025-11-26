@@ -3,7 +3,7 @@ name: AdBlock List Aggregator
 # 1. 设置触发器: 每天定时运行一次
 on:
   schedule:
-    - cron: '0 0 * * *'
+    - cron: '0 16 * * *'
   workflow_dispatch:
 permissions:
   contents: write # 授予默认 GITHUB_TOKEN 对仓库内容的写入权限，使其可以 push
