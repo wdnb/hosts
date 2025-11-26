@@ -1,5 +1,5 @@
 # Debug: Unrecognized, inefficient, or non-conforming lines
-# Generated: 2025-11-26T13:45:17Z
+# Generated: 2025-11-26T16:27:58Z
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .com-id*.com^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] .com-id*.info^
 [https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt] ||avito.avito.avito.
