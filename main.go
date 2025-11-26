@@ -20,7 +20,7 @@ import (
 
 const (
 	OutputFile           = "adblock_aggr_optimized.txt"      // 输出的规则文件
-	DebugFile            = "adblock_debug_unrecognized.txt"  // 未识别、低效规则等
+	DebugFile            = "adblock_debug_unrecognized.txt"  // 未识别、低效、冗余规则等
 	UserAgent            = "AdGuard-HostlistCompiler-Go/1.1" // 请求头
 	InvalidDomainsSource = "invalid_domains.txt"             // 本地路径或 URL
 	// 上游规则源列表的 URL
@@ -29,10 +29,10 @@ const (
 
 // Global storage
 var (
-	validRules     = make(map[string]struct{}) // 存储有效规则 (Set)
-	debugLines     = make([]string, 0)         // 存储未识别或低效行
+	validRules     = make(map[string]struct{}) // 存储有效高效规则 (Set，去重)
+	debugLines     = make([]string, 0)         // 存储未识别、低效或不符合行
 	invalidDomains = make(map[string]struct{}) // 无效域名 Set
-	mutex          sync.Mutex                  // 保护上述两个容器的并发写入
+	mutex          sync.Mutex                  // 保护并发写入
 )
 
 func main() {
@@ -53,15 +53,14 @@ func main() {
 
 	// 3. 并发下载所有源
 	var wg sync.WaitGroup
-	// 限制并发数为 10
-	sem := make(chan struct{}, 10)
+	sem := make(chan struct{}, 10) // 限制并发数为 10
 
 	for _, url := range upstreams {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
-			sem <- struct{}{}        // 获取令牌
-			defer func() { <-sem }() // 释放令牌
+			sem <- struct{}{}
+			defer func() { <-sem }()
 			processURL(u)
 		}(url)
 	}
@@ -154,7 +153,6 @@ func processURL(url string) {
 	}
 
 	scanner := bufio.NewScanner(resp.Body)
-	// 增大 Buffer 防止单行过长报错
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
@@ -169,7 +167,7 @@ func processURL(url string) {
 		cleaned, isDebug := normalizeLine(line, origLine)
 
 		if cleaned != "" {
-			// 检查是否需要排除 (无效域名)
+			// 检查无效域名
 			domain := extractDomain(cleaned)
 			if domain != "" {
 				if _, found := invalidDomains[domain]; found {
@@ -190,7 +188,7 @@ func processURL(url string) {
 		fmt.Printf("!!! 读取流错误 [%s]: %v\n", url, err)
 	}
 
-	// 批量加锁写入全局存储
+	// 批量写入全局 (Set 自动去重)
 	mutex.Lock()
 	for _, r := range localRules {
 		validRules[r] = struct{}{}
@@ -199,7 +197,7 @@ func processURL(url string) {
 	mutex.Unlock()
 }
 
-// normalizeLine: 简化规则规范化逻辑 (KISS: 优先检测 AdGuard 格式，直接收入高效的；低效如regex/IP到debug；Hosts/域名转换；通配/非标尝试转换；剩余原样 + 标记debug)
+// normalizeLine: 只保留高效纯域名阻塞规则 (||domain^)，淘汰其他不符合/低效/冗余
 func normalizeLine(line, origLine string) (string, bool) {
 	if line == "" {
 		return "", false
@@ -210,10 +208,9 @@ func normalizeLine(line, origLine string) (string, bool) {
 		return "", false
 	}
 
-	// 转换为小写用于检测，保留origLine为输出
 	lowerLine := strings.ToLower(line)
 
-	// 移除协议前缀 (如果有)
+	// 移除协议前缀
 	if strings.HasPrefix(lowerLine, "http://") {
 		lowerLine = lowerLine[7:]
 		origLine = origLine[7:]
@@ -225,21 +222,19 @@ func normalizeLine(line, origLine string) (string, bool) {
 		origLine = origLine[3:]
 	}
 
-	// 检测低效规则: 正则 (/regex/)
-	if strings.HasPrefix(lowerLine, "/") && strings.HasSuffix(lowerLine, "/") && len(lowerLine) > 2 {
+	// 淘汰低效: 正则、@@、| (非||)、$modifiers、通配*、IP 等
+	if strings.Contains(lowerLine, "/") || strings.Contains(lowerLine, "@@") ||
+		(strings.HasPrefix(lowerLine, "|") && !strings.HasPrefix(lowerLine, "||")) ||
+		strings.Contains(lowerLine, "$") || strings.Contains(lowerLine, "*") ||
+		net.ParseIP(lowerLine) != nil {
 		return "", true
 	}
 
-	// 直接放行高效 AdGuard 格式 (||, @@, | 开头，最小长度 3)
-	if len(lowerLine) >= 3 && (strings.HasPrefix(lowerLine, "||") || strings.HasPrefix(lowerLine, "@@") || strings.HasPrefix(lowerLine, "|")) {
-		return origLine, false
-	}
-
-	// 处理 Hosts 格式 (转换为 AdGuard 格式，仅域名)
+	// 处理 Hosts 格式 (仅纯域名)
 	if strings.HasPrefix(lowerLine, "0.0.0.0 ") || strings.HasPrefix(lowerLine, "127.0.0.1 ") {
 		parts := strings.Fields(lowerLine)
 		if len(parts) < 2 || strings.ContainsAny(lowerLine, "/?=&") {
-			return "", true // 脏数据
+			return "", true
 		}
 		domain := parts[1]
 		if domain == "localhost" || domain == "local" || domain == "0.0.0.0" || domain == "127.0.0.1" {
@@ -249,87 +244,36 @@ func normalizeLine(line, origLine string) (string, bool) {
 		if err == nil {
 			return "||" + normalizedDomain + "^", false
 		}
-		// 如果是 IP，视为低效
-		if net.ParseIP(domain) != nil {
-			return "", true
-		}
-		return "", true // 无效
-	}
-
-	// 分离修饰符 ($...)
-	modifiers := ""
-	origModifiers := ""
-	if idx := strings.Index(lowerLine, "$"); idx != -1 {
-		modifiers = lowerLine[idx:]
-		origModifiers = origLine[idx:]
-		lowerLine = lowerLine[:idx]
-		origLine = origLine[:idx]
-	}
-
-	// 统一移除尾部 '^' (如果存在)
-	pattern := strings.TrimSuffix(lowerLine, "^")
-	origPattern := strings.TrimSuffix(origLine, "^")
-
-	// 移除前导 '.' 或 '-'
-	pattern = strings.TrimLeft(pattern, ".-")
-	origPattern = strings.TrimLeft(origPattern, ".-")
-
-	if pattern == "" {
-		return "", true // 空
-	}
-
-	// 处理通配符规则 (允许 * 等；转换为 AdGuard 格式)
-	if strings.Contains(pattern, "*") {
-		// 简单校验: 只含允许字符
-		if strings.ContainsAny(pattern, "!@#%&()=[]{}\\|;'\",<>?`~") {
-			return origLine + origModifiers, true // 复杂，原样 + debug
-		}
-		prefix := "||"
-		if strings.HasPrefix(pattern, "*") {
-			pattern = strings.TrimPrefix(pattern, "*")
-			origPattern = strings.TrimPrefix(origPattern, "*")
-			prefix = "||*"
-		}
-		// 尝试规范化 (如果无*后是域名)
-		normalizedPattern, err := normalizeDomain(pattern)
-		if err == nil {
-			return prefix + normalizedPattern + "^" + origModifiers, false
-		}
-		return prefix + origPattern + "^" + origModifiers, false // 仍转换
-	}
-
-	// 处理纯域名 (使用库规范化，支持 punycode 和非标)
-	normalized, err := normalizeDomain(pattern)
-	if err == nil {
-		return "||" + normalized + "^" + origModifiers, false
-	}
-
-	// 如果是 IP，视为低效
-	if ip := net.ParseIP(pattern); ip != nil {
 		return "", true
 	}
 
-	// 非标准规则: 尝试作为域名处理 (宽松，支持 _ 等)
-	if strings.ContainsAny(pattern, "abcdefghijklmnopqrstuvwxyz0123456789-._:") && !strings.ContainsAny(pattern, "!@#%&()=[]{}\\|;'\",<>?`~/=*") {
-		normalized, err = idna.ToASCII(pattern)
-		if err == nil && normalized != "" {
-			return "||" + normalized + "^" + origModifiers, false
+	// 处理 AdGuard ||domain^ 格式 (仅纯域名，无modifiers/通配)
+	if strings.HasPrefix(lowerLine, "||") && strings.HasSuffix(lowerLine, "^") && len(lowerLine) >= 5 {
+		domain := strings.TrimSuffix(strings.TrimPrefix(lowerLine, "||"), "^")
+		normalizedDomain, err := normalizeDomain(domain)
+		if err == nil && !strings.ContainsAny(domain, "/*$@|") {
+			return "||" + normalizedDomain + "^", false
 		}
+		return "", true
 	}
 
-	// 剩余不能匹配的: 原样返回，并标记debug
-	return origLine + origModifiers, true
+	// 处理纯域名 (转换为 ||domain^)
+	normalized, err := normalizeDomain(lowerLine)
+	if err == nil {
+		return "||" + normalized + "^", false
+	}
+
+	// 剩余淘汰
+	return "", true
 }
 
-// normalizeDomain: 使用 idna 库处理 punycode 和简单校验 (支持 _ 等非标)
+// normalizeDomain: 处理 punycode 和校验 (宽松支持非标)
 func normalizeDomain(domain string) (string, error) {
-	// 转换为 Punycode (ASCII)
 	asciiDomain, err := idna.ToASCII(domain)
 	if err != nil {
 		return "", err
 	}
-	// 简单校验: 至少一个 .，字母数字 - _ . 组成，TLD 至少 2 位 (宽松)
-	if !strings.Contains(asciiDomain, ".") || len(asciiDomain) < 4 || strings.ContainsAny(asciiDomain, "!@#%&()=[]{}\\|;'\",<>?`~/*:^") {
+	if !strings.Contains(asciiDomain, ".") || len(asciiDomain) < 4 || strings.ContainsAny(asciiDomain, "!@#%&()=[]{}\\|;'\",<>?`~/*:^$") {
 		return "", fmt.Errorf("invalid domain")
 	}
 	return asciiDomain, nil
@@ -374,31 +318,13 @@ func loadInvalidDomains(source string) map[string]struct{} {
 
 func extractDomain(rule string) string {
 	ruleLower := strings.ToLower(rule)
-	if idx := strings.Index(ruleLower, "$"); idx != -1 {
-		ruleLower = ruleLower[:idx]
-	}
-
 	if strings.HasPrefix(ruleLower, "||") && strings.HasSuffix(ruleLower, "^") {
 		domain := strings.TrimSuffix(strings.TrimPrefix(ruleLower, "||"), "^")
-		if strings.Contains(domain, "*") {
-			// 对于通配符，提取不带 * 的纯域名部分
-			trimmedDomain := strings.TrimPrefix(domain, "*")
-			if !strings.Contains(trimmedDomain, "*") {
-				_, err := normalizeDomain(trimmedDomain)
-				if err == nil {
-					return trimmedDomain
-				}
-			}
-			return ""
+		_, err := normalizeDomain(domain)
+		if err == nil {
+			return domain
 		}
-		return domain
 	}
-
-	_, err := normalizeDomain(ruleLower)
-	if err == nil {
-		return ruleLower
-	}
-
 	return ""
 }
 
@@ -411,12 +337,12 @@ func writeSliceToFile(filename string, lines []string, isResult bool) error {
 
 	w := bufio.NewWriter(f)
 	if isResult {
-		fmt.Fprintln(w, "! Title: Optimized AdGuard Home Blocklist")
+		fmt.Fprintln(w, "! Title: Optimized AdGuard Home Blocklist (Efficient Domains Only)")
 		fmt.Fprintf(w, "! Updated: %s\n", time.Now().Format(time.RFC3339))
 		fmt.Fprintf(w, "! Total count: %d\n", len(lines))
 		fmt.Fprintln(w, "!")
 	} else {
-		fmt.Fprintln(w, "# Debug: Unrecognized and low-efficiency lines (e.g., regex, IP)")
+		fmt.Fprintln(w, "# Debug: Unrecognized, inefficient, or non-conforming lines")
 		fmt.Fprintf(w, "# Generated: %s\n", time.Now().Format(time.RFC3339))
 	}
 
