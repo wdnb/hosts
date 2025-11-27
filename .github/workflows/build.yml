@@ -27,7 +27,7 @@ jobs:
         run: |
           go build -o adblock-aggregator main.go
           ./adblock-aggregator
-          # 运行后将生成 adblock_aggr_optimized.txt 文件
+          # 运行后将生成 adblock_lite.txt 文件
 
       # 4. 提交更改回仓库
       - name: Commit and Push new list
@@ -37,11 +37,11 @@ jobs:
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
           # 2. 强制追踪并添加新生成的文件
-          git add -f adblock_aggr_optimized.txt adblock_debug_unrecognized.txt
+          git add -f adblock_lite.txt adblock_debug.txt
           
           # 3. 检查是否有实际的更改（防止空提交）
           if ! git diff --cached --exit-code --quiet; then
-              echo "发现 adblock_aggr_optimized.txt 存在更改，开始提交..."
+              echo "发现 adblock_lite.txt 存在更改，开始提交..."
               
               # 4. 提交更改
               git commit -m "🤖 Feat: Update aggregated adblock list (Daily Run)"
@@ -50,5 +50,5 @@ jobs:
               # 使用 GITHUB_TOKEN 认证进行推送
               git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           else
-              echo "文件 adblock_aggr_optimized.txt 内容与上次提交相同，跳过提交。"
+              echo "文件 adblock_lite.txt 内容与上次提交相同，跳过提交。"
           fi
