@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path"
 	"regexp"
 	"runtime"
 	"sort"
@@ -272,17 +273,18 @@ func downloadAndProcess(url string, invalidSet map[string]struct{}) (valid []str
 		}
 
 		clean, reason := normalizeLine(line)
-
+		//截取文件名
+		l := path.Base(url)
 		if clean == "" {
 			if len(line) > 5 {
-				invalid = append(invalid, DebugEntry{Source: url, Line: trimLong(line), Reason: reason})
+				invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(line), Reason: reason})
 			}
 			continue
 		}
 
 		// 检查: 是否在无效域名黑名单中
 		if _, exists := invalidSet[clean]; exists {
-			invalid = append(invalid, DebugEntry{Source: url, Line: clean, Reason: "Blocked by invalid_domains"})
+			invalid = append(invalid, DebugEntry{Source: l, Line: clean, Reason: "invalid_domains"})
 			continue
 		}
 
