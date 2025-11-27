@@ -132,7 +132,7 @@ func main() {
 
 	fmt.Printf("    -> 优化算法总耗时: %v\n", time.Since(optStart))
 	fmt.Printf("    -> 1. 通配符剪枝剔除: %d 条\n", wildcardPrunedCount)
-	fmt.Printf("    -> 2. 子域名剔除剔除: %d 条\n", subdomainPrunedCount)
+	fmt.Printf("    -> 2. 子域名剔除: %d 条\n", subdomainPrunedCount)
 	fmt.Printf("    -> 总优化剔除: %d 条 (最终规则数: %d)\n", totalPruned, len(wildcards)+len(optimizedExacts))
 
 	// 4. 生成最终结果
