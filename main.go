@@ -63,10 +63,11 @@ func main() {
 
 	// 2. 并发下载与清洗
 	var (
-		rawRules = make(map[string]struct{})
-		debugLog = make([]DebugEntry, 0)
-		mu       sync.Mutex
-		wg       sync.WaitGroup
+		rawRules     = make(map[string]struct{})
+		exceptionSet = make(map[string]struct{})
+		debugLog     = make([]DebugEntry, 0)
+		mu           sync.Mutex
+		wg           sync.WaitGroup
 	)
 
 	sem := make(chan struct{}, MaxGoroutines)
@@ -87,11 +88,14 @@ func main() {
 			}
 
 			// 下载并解析，传入 invalidSet 进行过滤
-			valid, invalid := downloadAndProcess(u, invalidSet)
+			valid, invalid, exceptions := downloadAndProcess(u, invalidSet)
 
 			mu.Lock()
 			for _, r := range valid {
 				rawRules[r] = struct{}{}
+			}
+			for _, ex := range exceptions {
+				exceptionSet[ex] = struct{}{}
 			}
 			// 仅记录前 100万 条错误日志，防止内存溢出
 			if len(debugLog) < 1000000 {
@@ -101,6 +105,16 @@ func main() {
 		}(i, url)
 	}
 	wg.Wait()
+
+	// 移除与例外规则冲突的阻塞规则
+	removedByException := 0
+	for r := range rawRules {
+		if _, ok := exceptionSet[r]; ok {
+			delete(rawRules, r)
+			removedByException++
+		}
+	}
+	fmt.Printf(">>> [Phase 1] 移除 %d 条因例外规则而冲突的阻塞规则\n", removedByException)
 
 	printMemUsage()
 	totalRaw := len(rawRules)
@@ -243,7 +257,7 @@ func isCoveredByWildcard(exact string, pattern string) bool {
 // 核心逻辑 (清洗与校验)
 // -----------------------------------------------------------------------------
 
-func downloadAndProcess(url string, invalidSet map[string]struct{}) (valid []string, invalid []DebugEntry) {
+func downloadAndProcess(url string, invalidSet map[string]struct{}) (valid []string, invalid []DebugEntry, exceptions []string) {
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", UserAgent)
@@ -272,12 +286,20 @@ func downloadAndProcess(url string, invalidSet map[string]struct{}) (valid []str
 			continue
 		}
 
+		lower := strings.ToLower(line)
+		isException := false
+		if strings.HasPrefix(lower, "@@") {
+			isException = true
+			line = strings.TrimPrefix(line, "@@")
+			lower = strings.ToLower(line) // Re-lower after trim
+		}
+
 		clean, reason := normalizeLine(line)
 		//截取文件名
 		l := path.Base(url)
 		if clean == "" {
 			if len(line) > 5 {
-				invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(line), Reason: reason})
+				invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(rawLine), Reason: reason})
 			}
 			continue
 		}
@@ -288,7 +310,12 @@ func downloadAndProcess(url string, invalidSet map[string]struct{}) (valid []str
 			continue
 		}
 
-		valid = append(valid, clean)
+		if isException {
+			exceptions = append(exceptions, clean)
+			invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(rawLine), Reason: "Exception Rule Ignored"})
+		} else {
+			valid = append(valid, clean)
+		}
 	}
 	return
 }
