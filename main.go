@@ -19,7 +19,6 @@ import (
 // -----------------------------------------------------------------------------
 // 配置与常量
 // -----------------------------------------------------------------------------
-
 const (
 	OutputFile         = "adblock_lite.txt"
 	DebugFile          = "adblock_debug.txt"
@@ -35,7 +34,6 @@ var validRulePattern = regexp.MustCompile(`^[a-z0-9.\-_*]+$`)
 // -----------------------------------------------------------------------------
 // 类型定义
 // -----------------------------------------------------------------------------
-
 // DebugEntry 记录调试信息
 type DebugEntry struct {
 	Source string
@@ -46,56 +44,46 @@ type DebugEntry struct {
 // -----------------------------------------------------------------------------
 // 主程序
 // -----------------------------------------------------------------------------
-
 func main() {
 	start := time.Now()
 	printHeader()
-
 	// 0. 加载排除域名列表
 	invalidSet := loadInvalidDomains(InvalidDomainsFile)
-
 	// 1. 获取上游
 	urls := fetchUpstreamList(UpstreamListSource)
 	if len(urls) == 0 {
 		fmt.Println("!!! 未获取到上游源，退出")
 		return
 	}
-
 	// 2. 并发下载与清洗
 	var (
-		rawRules     = make(map[string]struct{})
-		exceptionSet = make(map[string]struct{})
-		debugLog     = make([]DebugEntry, 0)
-		mu           sync.Mutex
-		wg           sync.WaitGroup
+		blackRaw = make(map[string]struct{})
+		whiteRaw = make(map[string]struct{})
+		debugLog = make([]DebugEntry, 0)
+		mu       sync.Mutex
+		wg       sync.WaitGroup
 	)
-
 	sem := make(chan struct{}, MaxGoroutines)
 	totalUrls := len(urls)
-
 	fmt.Printf(">>> [Phase 1] 开始并发下载 %d 个源...\n", totalUrls)
-
 	for i, url := range urls {
 		wg.Add(1)
 		go func(idx int, u string) {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-
 			// 实时进度打印
 			if idx > 0 && idx%5 == 0 {
-				fmt.Printf("    -> 下载进度: %d/%d (总耗时: %v)\n", idx, totalUrls, time.Since(start).Round(time.Second))
+				fmt.Printf(" -> 下载进度: %d/%d (总耗时: %v)\n", idx, totalUrls, time.Since(start).Round(time.Second))
 			}
-
 			// 下载并解析，传入 invalidSet 进行过滤
-			valid, invalid, exceptions := downloadAndProcess(u, invalidSet)
-
+			validBlack, validWhite, invalid := downloadAndProcess(u, invalidSet)
 			mu.Lock()
-			for _, r := range valid {
-				rawRules[r] = struct{}{}
+			for _, r := range validBlack {
+				blackRaw[r] = struct{}{}
 			}
-			for _, ex := range exceptions {
-				exceptionSet[ex] = struct{}{}
+			for _, r := range validWhite {
+				whiteRaw[r] = struct{}{}
 			}
 			// 仅记录前 100万 条错误日志，防止内存溢出
 			if len(debugLog) < 1000000 {
@@ -105,67 +93,57 @@ func main() {
 		}(i, url)
 	}
 	wg.Wait()
-
-	// 移除与例外规则冲突的阻塞规则
-	removedByException := 0
-	for r := range rawRules {
-		if _, ok := exceptionSet[r]; ok {
-			delete(rawRules, r)
-			removedByException++
-		}
-	}
-	fmt.Printf(">>> [Phase 1] 移除 %d 条因例外规则而冲突的阻塞规则\n", removedByException)
-
 	printMemUsage()
-	totalRaw := len(rawRules)
+	totalRaw := len(blackRaw) + len(whiteRaw)
 	fmt.Printf(">>> [Phase 1 Done] 初筛后规则总数: %d | 耗时: %v\n", totalRaw, time.Since(start))
-
 	// 3. 分类与深度优化 (压缩核心)
 	fmt.Println(">>> [Phase 2] 执行高级规则优化 (通配符剪枝 & 子域名剔除)...")
-
-	wildcards := make([]string, 0)
-	exacts := make([]string, 0)
-
-	for r := range rawRules {
+	wildcardsBlack := make([]string, 0)
+	exactsBlack := make([]string, 0)
+	for r := range blackRaw {
 		if strings.Contains(r, "*") {
-			wildcards = append(wildcards, r)
+			wildcardsBlack = append(wildcardsBlack, r)
 		} else {
-			exacts = append(exacts, r)
+			exactsBlack = append(exactsBlack, r)
 		}
 	}
-
 	optStart := time.Now()
-
 	// 3a. 通配符剪枝 (解决通配符对纯域名的覆盖问题)
-	remainingExacts, wildcardPrunedCount := wildcardPruning(exacts, wildcards)
-
+	remainingExactsBlack, wildcardPrunedCount := wildcardPruning(exactsBlack, wildcardsBlack)
 	// 3b. 子域名剔除 (解决父域名对子域名的覆盖问题)
-	optimizedExacts, subdomainPrunedCount := removeSubdomains(remainingExacts)
-
+	optimizedExactsBlack, subdomainPrunedCount := removeSubdomains(remainingExactsBlack)
 	totalPruned := wildcardPrunedCount + subdomainPrunedCount
-
-	fmt.Printf("    -> 优化算法总耗时: %v\n", time.Since(optStart))
-	fmt.Printf("    -> 1. 通配符剪枝剔除: %d 条\n", wildcardPrunedCount)
-	fmt.Printf("    -> 2. 子域名剔除: %d 条\n", subdomainPrunedCount)
-	fmt.Printf("    -> 总优化剔除: %d 条 (最终规则数: %d)\n", totalPruned, len(wildcards)+len(optimizedExacts))
-
+	fmt.Printf(" -> 优化算法总耗时: %v\n", time.Since(optStart))
+	fmt.Printf(" -> 1. 通配符剪枝剔除: %d 条\n", wildcardPrunedCount)
+	fmt.Printf(" -> 2. 子域名剔除: %d 条\n", subdomainPrunedCount)
+	fmt.Printf(" -> 总优化剔除: %d 条 (最终黑名单规则数: %d)\n", totalPruned, len(wildcardsBlack)+len(optimizedExactsBlack))
 	// 4. 生成最终结果
 	fmt.Println(">>> [Phase 3] 生成文件...")
-	finalList := make([]string, 0, len(wildcards)+len(optimizedExacts))
-
-	// 重组为 AdGuard 格式
-	for _, w := range wildcards {
-		finalList = append(finalList, fmt.Sprintf("||%s^", w))
+	blackList := make([]string, 0, len(wildcardsBlack)+len(optimizedExactsBlack))
+	for _, w := range wildcardsBlack {
+		if _, ok := whiteRaw[w]; !ok {
+			blackList = append(blackList, fmt.Sprintf("||%s^", w))
+		}
 	}
-	for _, e := range optimizedExacts {
-		finalList = append(finalList, fmt.Sprintf("||%s^", e))
+	for _, e := range optimizedExactsBlack {
+		if _, ok := whiteRaw[e]; !ok {
+			blackList = append(blackList, fmt.Sprintf("||%s^", e))
+		}
 	}
-	sort.Strings(finalList)
-
+	sort.Strings(blackList)
+	whiteList := make([]string, 0, len(whiteRaw))
+	for w := range whiteRaw {
+		whiteList = append(whiteList, w)
+	}
+	sort.Strings(whiteList)
+	finalList := make([]string, 0, len(blackList)+len(whiteList))
+	finalList = append(finalList, blackList...)
+	for _, w := range whiteList {
+		finalList = append(finalList, fmt.Sprintf("@@||%s^", w))
+	}
 	// 5. 写入
 	writeResultFile(OutputFile, finalList)
 	writeDebugFile(DebugFile, debugLog)
-
 	fmt.Println("---------------------------------------------------------")
 	fmt.Printf(">>> 全部完成!\n")
 	fmt.Printf(">>> 最终规则数: %d\n", len(finalList))
@@ -176,25 +154,20 @@ func main() {
 // -----------------------------------------------------------------------------
 // 压缩算法 V2: 通配符剪枝
 // -----------------------------------------------------------------------------
-
 // wildcardPruning: 剔除被通配符规则完全覆盖的纯域名规则。
 func wildcardPruning(exacts []string, wildcards []string) ([]string, int) {
 	if len(wildcards) == 0 {
 		return exacts, 0
 	}
-
 	exactMap := make(map[string]struct{})
 	for _, e := range exacts {
 		exactMap[e] = struct{}{}
 	}
-
 	removedCount := 0
-
 	for _, exact := range exacts {
 		if _, ok := exactMap[exact]; !ok {
 			continue
 		}
-
 		for _, pattern := range wildcards {
 			if isCoveredByWildcard(exact, pattern) {
 				delete(exactMap, exact) // 移除冗余的 exact 域名
@@ -203,12 +176,10 @@ func wildcardPruning(exacts []string, wildcards []string) ([]string, int) {
 			}
 		}
 	}
-
 	remainingExacts := make([]string, 0, len(exactMap))
 	for e := range exactMap {
 		remainingExacts = append(remainingExacts, e)
 	}
-
 	return remainingExacts, removedCount
 }
 
@@ -217,7 +188,6 @@ func isCoveredByWildcard(exact string, pattern string) bool {
 	// 1. 拆分模式：例如 "*-analytics*.huami.com" -> ["", "-analytics", ".huami.com"]
 	parts := strings.Split(pattern, "*")
 	idx := 0 // 记录在 exact 字符串中匹配到的位置
-
 	// 2. 检查前缀 (parts[0])
 	if parts[0] != "" {
 		if !strings.HasPrefix(exact, parts[0]) {
@@ -225,21 +195,18 @@ func isCoveredByWildcard(exact string, pattern string) bool {
 		}
 		idx = len(parts[0])
 	}
-
 	// 3. 检查中间部分 (parts[1] 到 parts[len-2]) 必须按顺序出现
 	for i := 1; i < len(parts)-1; i++ {
 		part := parts[i]
 		if part == "" {
 			continue // 处理 ** 或 *.* 这种连续通配符
 		}
-
 		foundIdx := strings.Index(exact[idx:], part)
 		if foundIdx == -1 {
 			return false // 中间部分未找到
 		}
 		idx += foundIdx + len(part)
 	}
-
 	// 4. 检查后缀 (parts[len-1])
 	lastPart := parts[len(parts)-1]
 	if lastPart != "" {
@@ -249,84 +216,65 @@ func isCoveredByWildcard(exact string, pattern string) bool {
 	} else if len(parts) > 1 && idx > len(exact) {
 		return false
 	}
-
 	return true
 }
 
 // -----------------------------------------------------------------------------
 // 核心逻辑 (清洗与校验)
 // -----------------------------------------------------------------------------
-
-func downloadAndProcess(url string, invalidSet map[string]struct{}) (valid []string, invalid []DebugEntry, exceptions []string) {
+func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack []string, validWhite []string, invalid []DebugEntry) {
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", UserAgent)
-
 	resp, err := client.Do(req)
 	if err != nil {
 		invalid = append(invalid, DebugEntry{Source: url, Line: "Network", Reason: err.Error()})
 		return
 	}
 	defer resp.Body.Close()
-
 	if resp.StatusCode != 200 {
 		invalid = append(invalid, DebugEntry{Source: url, Line: "Status", Reason: fmt.Sprint(resp.StatusCode)})
 		return
 	}
-
 	scanner := bufio.NewScanner(resp.Body)
 	buf := make([]byte, 0, 1024*1024)
 	scanner.Buffer(buf, 1024*1024)
-
 	for scanner.Scan() {
 		rawLine := scanner.Text()
 		line := strings.TrimSpace(rawLine)
-
 		if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
 			continue
 		}
-
-		lower := strings.ToLower(line)
-		isException := false
-		if strings.HasPrefix(lower, "@@") {
-			isException = true
-			line = strings.TrimPrefix(line, "@@")
-			lower = strings.ToLower(line) // Re-lower after trim
-		}
-
-		clean, reason := normalizeLine(line)
-		//截取文件名
+		clean, isWhite, reason := normalizeLine(line)
+		// 截取文件名
 		l := path.Base(url)
 		if clean == "" {
 			if len(line) > 5 {
-				invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(rawLine), Reason: reason})
+				invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(line), Reason: reason})
 			}
 			continue
 		}
-
 		// 检查: 是否在无效域名黑名单中
 		if _, exists := invalidSet[clean]; exists {
 			invalid = append(invalid, DebugEntry{Source: l, Line: clean, Reason: "invalid_domains"})
 			continue
 		}
-
-		if isException {
-			exceptions = append(exceptions, clean)
-			invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(rawLine), Reason: "Exception Rule Ignored"})
+		if isWhite {
+			validWhite = append(validWhite, clean)
 		} else {
-			valid = append(valid, clean)
+			validBlack = append(validBlack, clean)
 		}
 	}
 	return
 }
 
-func normalizeLine(line string) (string, string) {
+func normalizeLine(line string) (string, bool, string) {
 	lower := strings.ToLower(line)
+	isWhite := false
 	// 1. 修饰符截断
 	if before, _, found := strings.Cut(lower, "$"); found {
 		lower = strings.TrimSpace(before)
 	}
-
 	// 2. 协议及IP剥离 (Go 1.20+ CutPrefix)
 	for {
 		var found bool
@@ -348,23 +296,24 @@ func normalizeLine(line string) (string, string) {
 		break
 	}
 	lower = strings.TrimSpace(lower)
-
 	// 3. AdGuard 语法清理
-	if val, found := strings.CutPrefix(lower, "||"); found {
+	if val, found := strings.CutPrefix(lower, "@@||"); found {
+		isWhite = true
+		lower = val
+	} else if val, found := strings.CutPrefix(lower, "||"); found {
 		lower = val
 	}
 	if val, found := strings.CutSuffix(lower, "^"); found {
 		lower = val
 	}
-
 	// 4. Hosts 尾部清理
 	fields := strings.Fields(lower)
 	if len(fields) > 0 {
 		lower = fields[0]
 	}
-
 	// 5. 域名校验
-	return validateDomain(lower)
+	clean, reason := validateDomain(lower)
+	return clean, isWhite, reason
 }
 
 func validateDomain(domain string) (string, string) {
@@ -375,27 +324,22 @@ func validateDomain(domain string) (string, string) {
 	if domain == "localhost" || domain == "local" {
 		return "", "Localhost"
 	}
-
 	// 压缩逻辑：防止顶级域名 (TLD) 被误加入
 	if !strings.Contains(domain, ".") {
 		return "", "TLD/Single Word"
 	}
-
 	if !validRulePattern.MatchString(domain) {
 		return "", "Invalid Chars"
 	}
-
 	// 通配符不进行 IDNA
 	if strings.Contains(domain, "*") {
 		return domain, ""
 	}
-
 	// Punycode 转码
 	puny, err := idna.ToASCII(domain)
 	if err != nil {
 		return "", "Punycode Error"
 	}
-
 	return puny, ""
 }
 
@@ -405,7 +349,6 @@ func removeSubdomains(domains []string) ([]string, int) {
 		orig string
 		rev  string
 	}
-
 	items := make([]item, 0, len(domains))
 	for _, d := range domains {
 		// 翻转域名: example.com -> com.example
@@ -415,41 +358,32 @@ func removeSubdomains(domains []string) ([]string, int) {
 		}
 		items = append(items, item{orig: d, rev: strings.Join(parts, ".")})
 	}
-
 	sort.Slice(items, func(i, j int) bool {
 		return items[i].rev < items[j].rev
 	})
-
 	var result []string
 	removedCount := 0
-
 	if len(items) == 0 {
 		return result, 0
 	}
-
 	prev := items[0]
 	result = append(result, prev.orig)
-
 	for i := 1; i < len(items); i++ {
 		curr := items[i]
-
 		// 检查 curr 是否是 prev 的子域名
 		if strings.HasPrefix(curr.rev, prev.rev+".") {
 			removedCount++
 			continue
 		}
-
 		result = append(result, curr.orig)
 		prev = curr
 	}
-
 	return result, removedCount
 }
 
 // -----------------------------------------------------------------------------
 // 文件 IO 及辅助工具
 // -----------------------------------------------------------------------------
-
 func loadInvalidDomains(path string) map[string]struct{} {
 	set := make(map[string]struct{})
 	f, err := os.Open(path)
@@ -458,7 +392,6 @@ func loadInvalidDomains(path string) map[string]struct{} {
 		return set
 	}
 	defer f.Close()
-
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -468,7 +401,6 @@ func loadInvalidDomains(path string) map[string]struct{} {
 		line = strings.ToLower(line)
 		line = strings.TrimPrefix(line, "||")
 		line = strings.TrimSuffix(line, "^")
-
 		if line != "" {
 			set[line] = struct{}{}
 		}
@@ -480,7 +412,7 @@ func loadInvalidDomains(path string) map[string]struct{} {
 func printMemUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
-	fmt.Printf("    [System] Alloc = %v MiB | TotalAlloc = %v MiB | Sys = %v MiB | NumGC = %v\n",
+	fmt.Printf(" [System] Alloc = %v MiB | TotalAlloc = %v MiB | Sys = %v MiB | NumGC = %v\n",
 		m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.NumGC)
 }
 
@@ -501,7 +433,6 @@ func fetchUpstreamList(url string) []string {
 		return list
 	}
 	defer resp.Body.Close()
-
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
@@ -516,11 +447,9 @@ func writeResultFile(filename string, lines []string) {
 	f, _ := os.Create(filename)
 	defer f.Close()
 	w := bufio.NewWriter(f)
-
 	fmt.Fprintf(w, "! Title: AdGuard Home Optimized List\n")
 	fmt.Fprintf(w, "! Updated: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(w, "! Total Count: %d\n!\n", len(lines))
-
 	for _, line := range lines {
 		fmt.Fprintln(w, line)
 	}
@@ -535,17 +464,14 @@ func writeDebugFile(filename string, logs []DebugEntry) {
 	f, _ := os.Create(filename)
 	defer f.Close()
 	w := bufio.NewWriter(f)
-
 	fmt.Fprintf(w, "# Debug Log\n# Updated: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(w, "# Total Entries: %d\n\n", len(logs))
-
 	sort.Slice(logs, func(i, j int) bool {
 		if logs[i].Reason != logs[j].Reason {
 			return logs[i].Reason < logs[j].Reason
 		}
 		return logs[i].Source < logs[j].Source
 	})
-
 	for _, l := range logs {
 		fmt.Fprintf(w, "[%-15s] %s | Src: %s\n", l.Reason, l.Line, l.Source)
 	}
