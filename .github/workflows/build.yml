@@ -27,7 +27,7 @@ jobs:
         run: |
           go build -o adblock-aggregator main.go
           ./adblock-aggregator
-          # 运行后将生成 adblock_lite.txt 文件
+          # 运行后将生成 txt 文件
 
       # 4. 提交更改回仓库
       - name: Commit and Push new list
