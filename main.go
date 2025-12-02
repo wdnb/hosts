@@ -19,44 +19,43 @@ import (
 )
 
 // -----------------------------------------------------------------------------
-// 配置区域（关键修改在这里）
+// 配置区域
 // -----------------------------------------------------------------------------
-
 const (
 	OutputFile      = "invalid_domains.txt"
 	DebugFile       = "debug_invalid_sources.txt"
-	UserAgent       = "AdGuard-HostlistCompiler-Go/1.0"
+	UserAgent       = "AdGuard-HostlistCompiler-Go/2.0"
 	UpstreamListURL = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/main/upstream_list.txt"
-	// 资源控制
-	MaxConcurrency = 1000
-	DNSTimeout     = 1000 * time.Millisecond
+
+	MaxConcurrency = 1200
+	DNSTimeout     = 1200 * time.Millisecond
 	TestDomain     = "google.com"
-	QPSPerServer   = 200
-	BurstPerServer = 200
+	QPSPerServer   = 250
+	BurstPerServer = 300
 )
 
-// 上游 DNS 服务器
-// Why: Separate DNS lists by region to allow randomized selection between local (faster for some users) and global servers, improving resolution reliability.
+// 上游 DNS 服务器（国内 + 全球无过滤）
 var chinaDNS = []string{
 	"223.5.5.5:53", "223.6.6.6:53", "114.114.114.114:53", "114.114.115.115:53",
-	"180.76.76.76:53", "119.29.29.29:53", "182.254.116.116:53",
+	"119.29.29.29:53", "180.76.76.76:53",
 }
 
 var globalDNS = []string{
 	"1.1.1.1:53", "1.0.0.1:53", "8.8.8.8:53", "8.8.4.4:53",
-	"9.9.9.9:53", "149.112.112.112:53", "208.67.222.222:53", "208.67.220.220:53",
+	"9.9.9.9:53", "149.112.112.112:53",
 	"94.140.14.140:53", "94.140.14.141:53", // AdGuard DNS Unfiltered
-	"208.67.222.2:53", "208.67.220.2:53", // Cisco OpenDNS Sandbox (unfiltered)
 	"76.76.2.0:53", "76.76.10.0:53", // ControlD Unfiltered
+	"208.67.222.222:53", "208.67.220.220:53", // OpenDNS
 	"185.222.222.222:53", "45.11.45.11:53", // DNS.SB
-	"54.174.40.213:53", "52.3.100.184:53", // DNSWatchGO (malware prevention, closest to unfiltered)
-	"216.146.35.35:53", "216.146.36.36:53", // Dyn DNS
-	"80.80.80.80:53", "80.80.81.81:53", // Freenom World
+	"216.146.35.35:53", "216.146.36.36:53", // Dyn
 	"74.82.42.42:53", // Hurricane Electric
 }
 
-var domainExtractRegex = regexp.MustCompile(`^\|\|([a-zA-Z0-9.-]+)\^$`)
-var hostExtractRegex = regexp.MustCompile(`^(?:0\.0\.0\.0|127\.0\.0\.1)\s+([a-zA-Z0-9.-]+)`)
+var (
+	adguardRegex = regexp.MustCompile(`^\|\|([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)\^`)
+	hostsRegex   = regexp.MustCompile(`^(?:0\.0\.0\.0|127\.0\.0\.1|\[::\]|::1)\s+([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)`)
+	plainRegex   = regexp.MustCompile(`^([a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?(?:\.[a-zA-Z0-9]([a-zA-Z0-9-]{0,61}[a-zA-Z0-9])?)*)$`)
+)
 
 // -----------------------------------------------------------------------------
 // 主函数
@@ -64,28 +63,24 @@ var hostExtractRegex = regexp.MustCompile(`^(?:0\.0\.0\.0|127\.0\.0\.1)\s+([a-zA
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	start := time.Now()
-	fmt.Println(">>> [Init] 开始执行规则清洗与 DNS 无效检测...")
+	fmt.Println(">>> [Init] 开始执行 AdGuard/Hosts 规则清洗 + DNS 无效域名检测")
 
-	// 1. 从上游获取真正的源列表
+	// 1. 获取上游源列表
 	upstreams, err := fetchUpstreamList(UpstreamListURL)
-	if err != nil {
-		fmt.Printf("!!! 无法获取上游源列表 %s: %v\n", UpstreamListURL, err)
+	if err != nil || len(upstreams) == 0 {
+		fmt.Printf("!!! 无法获取或解析上游列表: %v\n", err)
 		os.Exit(1)
 	}
-	if len(upstreams) == 0 {
-		fmt.Println("!!! 上游源列表为空，退出")
-		os.Exit(1)
-	}
-	fmt.Printf(">>> [Upstream] 从 %s 成功加载 %d 个源\n", UpstreamListURL, len(upstreams))
+	fmt.Printf(">>> [Upstream] 成功加载 %d 个源\n", len(upstreams))
 
-	// 2. 预检查 DNS 可用性
+	// 2. 预检测可用 DNS
 	availableChina := filterAvailableDNS(chinaDNS)
 	availableGlobal := filterAvailableDNS(globalDNS)
-	if len(availableChina) == 0 || len(availableGlobal) == 0 {
-		fmt.Println("!!! 错误: 至少一个 DNS 列表无可用服务器 (China:", len(availableChina), ", Global:", len(availableGlobal), ")")
+	if len(availableChina)+len(availableGlobal) == 0 {
+		fmt.Println("!!! 所有 DNS 服务器都不可用，退出")
 		os.Exit(1)
 	}
-	fmt.Printf(">>> [DNS Precheck] 可用 DNS - China: %d, Global: %d\n", len(availableChina), len(availableGlobal))
+	fmt.Printf(">>> [DNS] 可用服务器 → 中国 %d，全球 %d\n", len(availableChina), len(availableGlobal))
 
 	// 3. 创建限速器
 	limiters := make(map[string]*rate.Limiter)
@@ -93,315 +88,313 @@ func main() {
 		limiters[s] = rate.NewLimiter(rate.Limit(QPSPerServer), BurstPerServer)
 	}
 
-	// 4. 下载并去重
-	ruleSources := make(map[string]map[string]struct{}) // rule -> set of upstream URLs
+	// 4. 并发下载 + 直接提取裸域名 + 去重
+	domainSources := make(map[string]map[string]struct{}) // domain → set[url]
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	fmt.Printf(">>> [Download] 开始并发下载 %d 个源...\n", len(upstreams))
-
+	fmt.Printf(">>> [Download] 开始并发下载并提取域名（%d 个源）...\n", len(upstreams))
 	for _, url := range upstreams {
 		wg.Add(1)
 		go func(u string) {
 			defer wg.Done()
-			rules := downloadAndParse(u)
-			if rules == nil {
+			domains := downloadAndExtractDomains(u)
+			if len(domains) == 0 {
 				return
 			}
 			mu.Lock()
-			for _, r := range rules {
-				if _, ok := ruleSources[r]; !ok {
-					ruleSources[r] = make(map[string]struct{})
+			for _, d := range domains {
+				if _, ok := domainSources[d]; !ok {
+					domainSources[d] = make(map[string]struct{})
 				}
-				ruleSources[r][u] = struct{}{}
+				domainSources[d][u] = struct{}{}
 			}
 			mu.Unlock()
 		}(url)
 	}
 	wg.Wait()
 
-	totalRaw := len(ruleSources)
-	fmt.Printf(">>> [Download] 下载完成。去重后原始规则数: %d\n", totalRaw)
+	totalDomains := len(domainSources)
+	fmt.Printf(">>> [Download] 完成！去重后共提取 %d 个唯一域名\n", totalDomains)
 
 	// 5. DNS 无效检测
-	checkQueue := make([]string, 0, totalRaw)
-	for r := range ruleSources {
-		checkQueue = append(checkQueue, r)
-	}
-
-	fmt.Printf(">>> [DNS Check] 开始 DNS 验证 (并发: %d, 超时: %v)...\n", MaxConcurrency, DNSTimeout)
-	invalidDomains, invalidSources := checkDomainsForInvalid(checkQueue, availableChina, availableGlobal, limiters, ruleSources)
+	fmt.Printf(">>> [DNS Check] 开始验证（并发 %d，超时 %v）...\n", MaxConcurrency, DNSTimeout)
+	invalidDomains, debugInfo := checkDomainsAlive(domainSources, availableChina, availableGlobal, limiters)
 
 	// 6. 输出结果
-	fmt.Printf(">>> [Output] 验证完成。无效域名: %d (有效规则: %d)\n", len(invalidDomains), totalRaw-len(invalidDomains))
+	validCount := totalDomains - len(invalidDomains)
+	fmt.Printf(">>> [Result] 验证完成！有效域名: %d，无效域名: %d (%.2f%%)\n",
+		validCount, len(invalidDomains), float64(len(invalidDomains))/float64(totalDomains)*100)
 
 	sort.Strings(invalidDomains)
-	if err := writeInvalidToFile(OutputFile, invalidDomains); err != nil {
-		fmt.Printf("!!! 写入失败: %v\n", err)
-		os.Exit(1)
+	if err := writeFile(OutputFile, generateInvalidList(invalidDomains)); err != nil {
+		fmt.Printf("!!! 写入 %s 失败: %v\n", OutputFile, err)
 	}
-	if err := writeDebugToFile(DebugFile, invalidSources); err != nil {
-		fmt.Printf("!!! 写入 debug 文件失败: %v\n", err)
-		os.Exit(1)
+	if err := writeFile(DebugFile, generateDebugInfo(debugInfo)); err != nil {
+		fmt.Printf("!!! 写入 %s 失败: %v\n", DebugFile, err)
 	}
 
-	fmt.Printf(">>> [Done] 全部完成，总耗时: %v\n", time.Since(start))
+	fmt.Printf(">>> [Done] 全部完成，总耗时 %v\n", time.Since(start))
 }
 
 // -----------------------------------------------------------------------------
-// 新增：从上游获取源列表
+// 工具函数
 // -----------------------------------------------------------------------------
 func fetchUpstreamList(url string) ([]string, error) {
-	client := &http.Client{Timeout: 30 * time.Second}
-	req, _ := http.NewRequest("GET", url, nil)
-	req.Header.Set("User-Agent", UserAgent)
-
-	resp, err := client.Do(req)
+	resp, err := httpGet(url)
 	if err != nil {
 		return nil, err
 	}
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("HTTP %d", resp.StatusCode)
-	}
-
 	var list []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		line := strings.TrimSpace(sc.Text())
 		if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
 			continue
 		}
 		list = append(list, line)
 	}
-	return list, scanner.Err()
+	return list, sc.Err()
 }
 
 func filterAvailableDNS(servers []string) []string {
-	var available []string
-	for _, server := range servers {
-		if checkDNSServer(server) {
-			available = append(available, server)
+	var ok []string
+	for _, s := range servers {
+		if testDNS(s) {
+			ok = append(ok, s)
 		}
 	}
-	return available
+	return ok
 }
 
-func checkDNSServer(server string) bool {
-	resolver := &net.Resolver{
+func testDNS(server string) bool {
+	r := &net.Resolver{
 		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
+		Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
 			d := net.Dialer{Timeout: DNSTimeout}
 			return d.DialContext(ctx, "udp", server)
 		},
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), DNSTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), DNSTimeout*2)
 	defer cancel()
-	ips, err := resolver.LookupHost(ctx, TestDomain)
-	return err == nil && len(ips) > 0
+	_, err := r.LookupHost(ctx, TestDomain)
+	return err == nil
 }
 
-func downloadAndParse(url string) []string {
-	client := &http.Client{Timeout: 20 * time.Second}
+func httpGet(url string) (*http.Response, error) {
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", UserAgent)
-
-	resp, err := client.Do(req)
-	if err != nil {
-		fmt.Printf("!!! 下载失败 [%s]: %v\n", url, err)
-		return nil
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode != 200 {
-		fmt.Printf("!!! 下载失败 [%s]: HTTP %d\n", url, resp.StatusCode)
-		return nil
-	}
-
-	var rules []string
-	scanner := bufio.NewScanner(resp.Body)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if cleaned := normalize(line); cleaned != "" {
-			rules = append(rules, cleaned)
-		}
-	}
-	return rules
+	client := &http.Client{Timeout: 30 * time.Second}
+	return client.Do(req)
 }
 
-func normalize(line string) string {
-	if len(line) < 4 || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
+// 核心：直接提取干净域名（完全参考 wdnb/hosts 的成熟实现）
+func extractCleanDomain(line string) string {
+	line = strings.TrimSpace(line)
+	if line == "" || strings.HasPrefix(line, "!") || strings.HasPrefix(line, "#") {
 		return ""
 	}
 	line = strings.ToLower(line)
-	if strings.HasPrefix(line, "||") && strings.HasSuffix(line, "^") {
-		return line
+
+	if m := adguardRegex.FindStringSubmatch(line); m != nil {
+		return m[1]
 	}
-	if strings.HasPrefix(line, "0.0.0.0 ") || strings.HasPrefix(line, "127.0.0.1 ") {
-		parts := strings.Fields(line)
-		if len(parts) >= 2 {
-			domain := parts[1]
-			if domain != "localhost" && domain != "local" {
-				return "||" + domain + "^"
-			}
+	if m := hostsRegex.FindStringSubmatch(line); m != nil {
+		d := m[1]
+		if isLocalLikeDomain(d) {
+			return ""
 		}
+		return d
+	}
+	if m := plainRegex.FindStringSubmatch(line); m != nil {
+		d := m[1]
+		if isLocalLikeDomain(d) {
+			return ""
+		}
+		return d
 	}
 	return ""
 }
 
-func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []string, limiters map[string]*rate.Limiter, ruleSources map[string]map[string]struct{}) ([]string, map[string][]string) {
-	var invalidDomains []string
-	var invalidSources = make(map[string][]string)
-	var mu sync.Mutex
+func isLocalLikeDomain(d string) bool {
+	switch d {
+	case "localhost", "local", "localdomain", "broadcasthost",
+		"ip6-localhost", "ip6-loopback", "ip6-localnet", "ip6-mcastprefix":
+		return true
+	}
+	return strings.HasSuffix(d, ".local") ||
+		strings.HasSuffix(d, ".lan") ||
+		strings.HasSuffix(d, ".home") ||
+		strings.HasSuffix(d, ".corp") ||
+		strings.HasSuffix(d, ".invalid")
+}
 
-	jobs := make(chan string, len(rules))
+func downloadAndExtractDomains(url string) []string {
+	resp, err := httpGet(url)
+	if err != nil {
+		fmt.Printf("!!! 下载失败 %s: %v\n", url, err)
+		return nil
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != 200 {
+		fmt.Printf("!!! HTTP %d %s\n", resp.StatusCode, url)
+		return nil
+	}
+
+	seen := make(map[string]struct{})
+	var domains []string
+	sc := bufio.NewScanner(resp.Body)
+	for sc.Scan() {
+		if d := extractCleanDomain(sc.Text()); d != "" {
+			if _, exists := seen[d]; !exists {
+				seen[d] = struct{}{}
+				domains = append(domains, d)
+			}
+		}
+	}
+	return domains
+}
+
+func checkDomainsAlive(domainSources map[string]map[string]struct{},
+	china, global []string, limiters map[string]*rate.Limiter) ([]string, map[string][]string) {
+
+	var invalid []string
+	debug := make(map[string][]string)
+	var mu sync.Mutex
+	var processed atomic.Int32
+	total := int64(len(domainSources))
+
+	jobs := make(chan string, 10000)
 	var wg sync.WaitGroup
-	var processedCount int32
-	total := int32(len(rules))
 
 	for i := 0; i < MaxConcurrency; i++ {
 		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for rule := range jobs {
-				domain := extractDomain(rule)
-				if domain == "" || strings.Contains(domain, "*") || !strings.Contains(domain, ".") {
-					continue
-				}
-
-				if !isDomainAlive(domain, availableChina, availableGlobal, limiters) {
-					mu.Lock()
-					invalidDomains = append(invalidDomains, domain)
-					sources := make([]string, 0, len(ruleSources[rule]))
-					for u := range ruleSources[rule] {
-						sources = append(sources, u)
-					}
-					sort.Strings(sources)
-					invalidSources[domain] = sources
-					mu.Unlock()
-				}
-
-				current := atomic.AddInt32(&processedCount, 1)
-				if current%5000 == 0 || current == total {
-					fmt.Printf("\r--> 进度: %d / %d (%.2f%%)", current, total, float64(current)/float64(total)*100)
-				}
-			}
-		}()
+		go worker(jobs, china, global, limiters, &processed, total, &invalid, debug, domainSources, &mu)
 	}
 
-	for _, r := range rules {
-		jobs <- r
+	for domain := range domainSources {
+		jobs <- domain
 	}
 	close(jobs)
 	wg.Wait()
-	fmt.Println()
-	return invalidDomains, invalidSources
+
+	return invalid, debug
 }
 
-func extractDomain(rule string) string {
-	if strings.HasPrefix(rule, "||") && strings.HasSuffix(rule, "^") {
-		return rule[2 : len(rule)-1]
-	}
-	return ""
-}
+func worker(jobs <-chan string,
+	china, global []string, limiters map[string]*rate.Limiter,
+	processed *atomic.Int32, total int64,
+	invalid *[]string, debug map[string][]string,
+	sources map[string]map[string]struct{}, mu *sync.Mutex) {
 
-func isDefinitelyNXDomain(err error) bool {
-	if err == nil {
-		return false
-	}
-	dnsErr, ok := err.(*net.DNSError)
-	if !ok {
-		return false
-	}
-	return dnsErr.IsNotFound || strings.Contains(strings.ToLower(err.Error()), "no such host")
-}
+	defer wg.Done()
 
-func isDomainAlive(domain string, availableChina, availableGlobal []string, limiters map[string]*rate.Limiter) bool {
-	// 合并所有可用 DNS，随机打乱更均匀
-	allServers := append(availableChina[:], availableGlobal...)
-	if len(allServers) == 0 {
-		return true // 没 DNS 可用时保守保留
-	}
-	rand.Shuffle(len(allServers), func(i, j int) { allServers[i], allServers[j] = allServers[j], allServers[i] })
+	all := append(china[:], global...)
+	rand.Shuffle(len(all), func(i, j int) { all[i], all[j] = all[j], all[i] })
 
-	// 最多尝试 3 次（足够避免单点抖动）
-	for i := 0; i < 3 && i < len(allServers); i++ {
-		server := allServers[i]
-
-		// 限速
-		if limiter := limiters[server]; limiter != nil {
-			_ = limiter.Wait(context.Background()) // 忽略限速错误
-		}
-
-		// 关键：这里必须用 &net.Dialer{} 取地址
-		resolver := &net.Resolver{
-			PreferGo: true,
-			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
-				d := &net.Dialer{Timeout: DNSTimeout} // 必须加 &
-				return d.DialContext(ctx, "udp", server)
-			},
-		}
-
-		ctx, cancel := context.WithTimeout(context.Background(), DNSTimeout)
-		ips, err := resolver.LookupHost(ctx, domain)
-		cancel()
-
-		// 1. 成功解析到 IP → 一定活的
-		if err == nil && len(ips) > 0 {
-			return true
-		}
-
-		// 2. 明确是 NXDomain → 继续尝试下一个 DNS
-		if err != nil && isDefinitelyNXDomain(err) {
+	for domain := range jobs {
+		if strings.Contains(domain, "*") || !strings.Contains(domain, ".") {
+			processed.Add(1)
 			continue
 		}
 
-		// 3. 其他所有情况（超时、ServFail、网络错误、临时失败等）→ 保守认为可能活的
-		return true
-	}
+		alive := false
+		for i := 0; i < 3 && i < len(all); i++ {
+			server := all[i]
+			if l := limiters[server]; l != nil {
+				_ = l.Wait(context.Background())
+			}
 
-	// 只有连续 3 次都明确返回 NXDomain，才最终判定为无效域名
-	return false
+			r := &net.Resolver{
+				PreferGo: true,
+				Dial: func(ctx context.Context, _, _ string) (net.Conn, error) {
+					d := net.Dialer{Timeout: DNSTimeout}
+					return d.DialContext(ctx, "udp", server)
+				},
+			}
+
+			ctx, cancel := context.WithTimeout(context.Background(), DNSTimeout)
+			ips, err := r.LookupHost(ctx, domain)
+			cancel()
+
+			if err == nil && len(ips) > 0 {
+				alive = true
+				break
+			}
+			if isNXDomain(err) {
+				continue // 明确不存在，继续下一个 DNS
+			}
+			// 超时/网络错误/ServFail 等 → 保守认为可能存在
+			alive = true
+			break
+		}
+
+		if !alive {
+			mu.Lock()
+			invalid = append(invalid, domain)
+			srcs := make([]string, 0, len(sources[domain]))
+			for u := range sources[domain] {
+				srcs = append(srcs, u)
+			}
+			sort.Strings(srcs)
+			debug[domain] = srcs
+			mu.Unlock()
+		}
+
+		cur := processed.Add(1)
+		if cur%8000 == 0 || cur == total {
+			fmt.Printf("\r--> 已处理: %d / %d (%.2f%%)", cur, total, float64(cur)/float64(total)*100)
+		}
+	}
 }
 
-func writeInvalidToFile(filename string, domains []string) error {
+func isNXDomain(err error) bool {
+	if err == nil {
+		return false
+	}
+	if dnsErr, ok := err.(*net.DNSError); ok {
+		return dnsErr.IsNotFound || strings.Contains(dnsErr.Error(), "no such host")
+	}
+	return strings.Contains(strings.ToLower(err.Error()), "no such host")
+}
+
+func writeFile(filename string, content string) error {
 	f, err := os.Create(filename)
 	if err != nil {
 		return err
 	}
 	defer f.Close()
-	w := bufio.NewWriter(f)
-	fmt.Fprintln(w, "! Title: Invalid Domains List (DNS Checked)")
-	fmt.Fprintf(w, "! Updated: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(w, "! Count: %d\n", len(domains))
-	fmt.Fprintln(w, "!")
-	for _, d := range domains {
-		fmt.Fprintln(w, d)
-	}
-	return w.Flush()
+	_, err = f.WriteString(content)
+	return err
 }
 
-func writeDebugToFile(filename string, invalidSources map[string][]string) error {
-	f, err := os.Create(filename)
-	if err != nil {
-		return err
-	}
-	defer f.Close()
-	w := bufio.NewWriter(f)
-	fmt.Fprintln(w, "! Title: Debug Invalid Domains with Sources")
-	fmt.Fprintf(w, "! Updated: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintf(w, "! Count: %d\n", len(invalidSources))
-	fmt.Fprintln(w, "! Format: domain | source1,source2,...")
-
-	domains := make([]string, 0, len(invalidSources))
-	for d := range invalidSources {
-		domains = append(domains, d)
-	}
-	sort.Strings(domains)
-
+func generateInvalidList(domains []string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("! Title: DNS Invalid Domains (Checked %s)\n", time.Now().Format("2006-01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("! Total invalid: %d\n", len(domains)))
+	sb.WriteString("!\n")
 	for _, d := range domains {
-		fmt.Fprintf(w, "%s | %s\n", d, strings.Join(invalidSources[d], ","))
+		sb.WriteString(d + "\n")
 	}
-	return w.Flush()
+	return sb.String()
+}
+
+func generateDebugInfo(m map[string][]string) string {
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("! Debug: Invalid Domains & Sources (%s)\n", time.Now().Format("2006-01-02 15:04")))
+	sb.WriteString(fmt.Sprintf("! Count: %d\n", len(m)))
+	sb.WriteString("! Format: domain | source1,source2,...\n\n")
+
+	list := make([]string, 0, len(m))
+	for d := range m {
+		list = append(list, d)
+	}
+	sort.Strings(list)
+
+	for _, d := range list {
+		sb.WriteString(fmt.Sprintf("%s | %s\n", d, strings.Join(m[d], ",")))
+	}
+	return sb.String()
 }
