@@ -27,15 +27,14 @@ import (
 // -----------------------------------------------------------------------------
 // Why: Group all constants at the top for easy configuration changes; avoids scattering values that could lead to inconsistencies.
 const (
-	OutputFile         = "adblock_lite.txt"
-	HostsOutputFile    = "adaway_hosts.txt"
-	DebugFile          = "adblock_debug.txt"
-	InvalidDomainsFile = "invalid_domains.txt"
-	UserAgent          = "AdGuard-Compiler/4.0 (Go 1.23; Advanced Pruning)"
-	MaxGoroutines      = 16
-	UpstreamListSource = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/main/upstream_list.txt"
-	BlockingIP         = "0.0.0.0"
-
+	OutputFile              = "adblock_lite.txt"
+	HostsOutputFile         = "adaway_hosts.txt"
+	DebugFile               = "adblock_debug.txt"
+	InvalidDomainsFile      = "invalid_domains.txt"
+	UserAgent               = "AdGuard-Compiler/4.0 (Go 1.23; Advanced Pruning)"
+	MaxGoroutines           = 16
+	UpstreamListSource      = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/main/upstream_list.txt"
+	BlockingIP              = "0.0.0.0"
 	DNSTimeout              = 1000 * time.Millisecond
 	TestDomain              = "t.cn"
 	MaxDNSConcurrency       = 500
@@ -100,15 +99,16 @@ func main() {
 		return
 	}
 
+	var invalidSet map[string]struct{}
+	var invalidWildcards []string // Separate wildcards for coverage checks in normal mode
+
 	// Why: Check the flag here to optionally run the pre-phase; avoids unnecessary DNS work in normal runs, saving time.
 	if *genInvalid {
-		generateInvalidDomains(urls, start)
+		invalidSet, invalidWildcards = generateInvalidDomains(urls, start)
 	} else {
 		fmt.Println(">>> [Info] 跳过 invalid_domains.txt 生成 (使用 -gen-invalid=true 以启用)")
+		invalidSet, invalidWildcards = loadInvalidDomains(InvalidDomainsFile)
 	}
-
-	// Why: Load invalid set after potential generation; ensures the latest exclusions are used if generated, or falls back gracefully if not.
-	invalidSet := loadInvalidDomains(InvalidDomainsFile)
 
 	var blackRaw = make(map[string]struct{})
 	var whiteRaw = make(map[string]struct{})
@@ -117,7 +117,7 @@ func main() {
 	fmt.Printf(">>> [Phase 1] 开始并发下载 %d 个源...\n", len(urls))
 	// Why: Use concurrent download for efficiency; processes multiple URLs in parallel but limits goroutines to prevent overwhelming the system.
 	concurrentDownload(urls, MaxGoroutines, start, func(u string) interface{} {
-		vb, vw, inv := downloadRules(u, ModeNormal, invalidSet)
+		vb, vw, inv := processRulesForMode(u, ModeNormal, invalidSet, invalidWildcards)
 		return struct {
 			black, white []string
 			invalid      []DebugEntry
@@ -240,10 +240,10 @@ func main() {
 }
 
 // -----------------------------------------------------------------------------
-// invalid_domains 生成
+// invalid_domains 生成 (优化版)
 // -----------------------------------------------------------------------------
 // Why: Isolate invalid generation in a function; allows conditional execution without cluttering main, and reuses components like concurrentDownload.
-func generateInvalidDomains(urls []string, overallStart time.Time) {
+func generateInvalidDomains(urls []string, overallStart time.Time) (map[string]struct{}, []string) {
 	// Why: Seed rand here for reproducibility in tests; ensures consistent random DNS selection across runs if needed.
 	rand.Seed(time.Now().UnixNano())
 	genStart := time.Now()
@@ -254,7 +254,7 @@ func generateInvalidDomains(urls []string, overallStart time.Time) {
 	// Why: Early exit if no DNS available; prevents wasting time on downloads if validation can't proceed.
 	if len(availableChina) == 0 && len(availableGlobal) == 0 {
 		fmt.Println("!!! [Pre-Phase] 无可用 DNS 服务器，跳过 invalid_domains 生成")
-		return
+		return make(map[string]struct{}), []string{}
 	}
 	fmt.Printf(">>> [Pre-Phase DNS] 可用 DNS - China: %d, Global: %d\n", len(availableChina), len(availableGlobal))
 
@@ -265,22 +265,29 @@ func generateInvalidDomains(urls []string, overallStart time.Time) {
 	}
 
 	ruleSources := make(map[string]map[string]struct{})
+	var wildcards []string
+	var exacts []string
+
 	fmt.Printf(">>> [Pre-Phase Download] 并发下载 %d 个源 (复用上游)...\n", len(urls))
 	// Why: Reuse concurrentDownload; matches the pattern in main for consistency, even though data needs differ slightly.
 	concurrentDownload(urls, MaxGoroutines, overallStart, func(u string) interface{} {
-		rules, _, _ := downloadRules(u, ModeInvalidGen, nil)
-		// Why: Return struct with url; passes per-URL data to aggregator without relying on closures, avoiding scope issues.
+		black, _, _ := processRulesForMode(u, ModeInvalidGen, nil, nil) // No invalids during gen
 		return struct {
-			rules []string
+			black []string
 			url   string
-		}{rules, u}
+		}{black, u}
 	}, func(res interface{}, mu *sync.Mutex) {
 		r := res.(struct {
-			rules []string
+			black []string
 			url   string
 		})
 		mu.Lock()
-		for _, rule := range r.rules {
+		for _, rule := range r.black {
+			if strings.Contains(rule, "*") {
+				wildcards = append(wildcards, rule)
+			} else {
+				exacts = append(exacts, rule)
+			}
 			if _, ok := ruleSources[rule]; !ok {
 				ruleSources[rule] = make(map[string]struct{})
 			}
@@ -292,25 +299,44 @@ func generateInvalidDomains(urls []string, overallStart time.Time) {
 	totalRaw := len(ruleSources)
 	fmt.Printf(">>> [Pre-Phase Download] 完成。去重后规则数: %d\n", totalRaw)
 
-	checkQueue := make([]string, 0, totalRaw)
-	for r := range ruleSources {
-		checkQueue = append(checkQueue, r)
+	// Reuse optimization logic to compress before DNS check
+	prunedLog := make([]DebugEntry, 0)
+	remainingExacts, wildcardPrunedCount := wildcardPruning(exacts, wildcards, &prunedLog)
+	optimizedExacts, subdomainPrunedCount := removeSubdomains(remainingExacts, &prunedLog)
+	fmt.Printf(">>> [Pre-Phase Optimize] 通配符剪枝剔除: %d 条, 子域名剔除: %d 条\n", wildcardPrunedCount, subdomainPrunedCount)
+
+	checkQueue := make([]string, 0, len(wildcards)+len(optimizedExacts))
+	for _, w := range wildcards {
+		checkQueue = append(checkQueue, w)
+	}
+	for _, e := range optimizedExacts {
+		checkQueue = append(checkQueue, e)
 	}
 
-	fmt.Printf(">>> [Pre-Phase DNS Check] 开始验证 (并发: %d, 超时: %v, QPS/服务器: %d)...\n", MaxDNSConcurrency, DNSTimeout, QPSPerServer)
+	fmt.Printf(">>> [Pre-Phase DNS Check] 开始验证压缩后规则 (总数: %d, 并发: %d, 超时: %v, QPS/服务器: %d)...\n", len(checkQueue), MaxDNSConcurrency, DNSTimeout, QPSPerServer)
 	invalidDomains, invalidSources := checkDomainsForInvalid(checkQueue, availableChina, availableGlobal, limiters, ruleSources)
 
-	fmt.Printf(">>> [Pre-Phase Output] 无效域名: %d (有效: %d)\n", len(invalidDomains), totalRaw-len(invalidDomains))
+	fmt.Printf(">>> [Pre-Phase Output] 无效域名: %d (有效: %d)\n", len(invalidDomains), len(checkQueue)-len(invalidDomains))
 	// Why: Sort before writing; ensures output is predictable and easier to compare across generations.
 	sort.Strings(invalidDomains)
 	if err := writeInvalidToFile(InvalidDomainsFile, invalidDomains); err != nil {
 		fmt.Printf("!!! [Pre-Phase] 写入 invalid_domains.txt 失败: %v\n", err)
-		return
 	}
 	if err := writeDebugInvalidSources(DebugInvalidSourcesFile, invalidSources); err != nil {
 		fmt.Printf("!!! [Pre-Phase] 写入 debug_invalid_sources.txt 失败: %v\n", err)
 	}
 	fmt.Printf(">>> [Pre-Phase Done] 完成，耗时: %v\n", time.Since(genStart))
+
+	invalidSet := make(map[string]struct{})
+	invalidWildcards := make([]string, 0)
+	for _, d := range invalidDomains {
+		if strings.Contains(d, "*") {
+			invalidWildcards = append(invalidWildcards, d)
+		} else {
+			invalidSet[d] = struct{}{}
+		}
+	}
+	return invalidSet, invalidWildcards
 }
 
 // -----------------------------------------------------------------------------
@@ -341,10 +367,10 @@ func concurrentDownload(urls []string, maxConc int, start time.Time, processor f
 }
 
 // -----------------------------------------------------------------------------
-// 合并下载逻辑
+// 共享规则处理 (下载 & 初筛)
 // -----------------------------------------------------------------------------
 // Why: Merge download logic into one function with modes; reduces code duplication between normal and invalid phases while handling differences conditionally.
-func downloadRules(url string, mode int, invalidSet map[string]struct{}) (black []string, white []string, invalids []DebugEntry) {
+func processRulesForMode(url string, mode int, invalidSet map[string]struct{}, invalidWildcards []string) (black []string, white []string, invalids []DebugEntry) {
 	resp, err := fetchResponse(url)
 	if err != nil {
 		// Why: Only log in normal mode; invalid gen doesn't need debug for network issues to keep output focused.
@@ -383,9 +409,30 @@ func downloadRules(url string, mode int, invalidSet map[string]struct{}) (black 
 			continue
 		}
 		if mode == ModeNormal {
-			// Why: Filter invalids only in normal mode; invalid gen doesn't use the set to avoid circular logic.
+			// Optimized filtering: check exact, then wildcard coverage, then subdomain
 			if _, exists := invalidSet[clean]; exists {
-				invalids = append(invalids, DebugEntry{source, clean, "invalid_domains"})
+				invalids = append(invalids, DebugEntry{source, clean, "invalid_domains (exact)"})
+				continue
+			}
+			covered := false
+			for _, iw := range invalidWildcards {
+				if isCoveredByWildcard(clean, iw) {
+					covered = true
+					invalids = append(invalids, DebugEntry{source, clean, "invalid_domains (wildcard): " + iw})
+					break
+				}
+			}
+			if covered {
+				continue
+			}
+			for parent := range invalidSet {
+				if isSubdomainOf(clean, parent) {
+					invalids = append(invalids, DebugEntry{source, clean, "invalid_domains (subdomain of): " + parent})
+					covered = true
+					break
+				}
+			}
+			if covered {
 				continue
 			}
 		}
@@ -394,12 +441,7 @@ func downloadRules(url string, mode int, invalidSet map[string]struct{}) (black 
 				white = append(white, clean)
 			}
 		} else {
-			if mode == ModeNormal {
-				black = append(black, clean)
-			} else if !strings.Contains(clean, "*") {
-				// Why: Format as AdGuard in invalid mode; standardizes for DNS checks without wildcards.
-				black = append(black, fmt.Sprintf("||%s^", clean))
-			}
+			black = append(black, clean) // In gen mode, include wildcards for pruning
 		}
 	}
 	return
@@ -489,7 +531,7 @@ func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []st
 		go func() {
 			defer wg.Done()
 			for rule := range jobs {
-				domain := extractDomain(rule)
+				domain := extractDomainFromRule(rule)
 
 				// Why: Skip invalid formats early; reduces unnecessary DNS queries for non-domain rules.
 				if domain == "" || strings.Contains(domain, "*") || !strings.Contains(domain, ".") {
@@ -498,14 +540,14 @@ func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []st
 
 				if !isDomainAlive(domain, availableChina, availableGlobal, limiters) {
 					mu.Lock()
-					invalidDomains = append(invalidDomains, domain)
+					invalidDomains = append(invalidDomains, rule) // Save original rule for consistency
 					sources := make([]string, 0, len(ruleSources[rule]))
 					for u := range ruleSources[rule] {
 						sources = append(sources, u)
 					}
 					// Why: Sort sources for consistent debug output; easier to compare logs.
 					sort.Strings(sources)
-					invalidSources[domain] = sources
+					invalidSources[rule] = sources
 					mu.Unlock()
 				}
 
@@ -528,12 +570,12 @@ func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []st
 	return invalidDomains, invalidSources
 }
 
-// Why: Extract domain from formatted rule; standardizes input for DNS checks.
-func extractDomain(rule string) string {
-	if strings.HasPrefix(rule, "||") && strings.HasSuffix(rule, "^") {
-		return rule[2 : len(rule)-1]
+// Why: Extract domain from rule; standardizes input for DNS checks, but return original for storage.
+func extractDomainFromRule(rule string) string {
+	if strings.Contains(rule, "*") {
+		return ""
 	}
-	return ""
+	return rule
 }
 
 // Why: Randomize list order; balances load and improves success by trying regional/global alternately.
@@ -779,12 +821,13 @@ func isValidDNSDomain(domain string) bool {
 // 文件 IO 及辅助
 // -----------------------------------------------------------------------------
 // Why: Skip comments and normalize; ensures clean set without extras that could falsely exclude valid rules.
-func loadInvalidDomains(path string) map[string]struct{} {
+func loadInvalidDomains(path string) (map[string]struct{}, []string) {
 	set := make(map[string]struct{})
+	wildcards := []string{}
 	f, err := os.Open(path)
 	if err != nil {
 		fmt.Printf(">>> [Info] 未找到 %s，跳过加载排除列表。\n", path)
-		return set
+		return set, wildcards
 	}
 	defer f.Close()
 	scanner := bufio.NewScanner(f)
@@ -797,11 +840,23 @@ func loadInvalidDomains(path string) map[string]struct{} {
 		line = strings.TrimPrefix(line, "||")
 		line = strings.TrimSuffix(line, "^")
 		if line != "" {
-			set[line] = struct{}{}
+			if strings.Contains(line, "*") {
+				wildcards = append(wildcards, line)
+			} else {
+				set[line] = struct{}{}
+			}
 		}
 	}
-	fmt.Printf(">>> [Init] 已加载 %d 条排除域名规则\n", len(set))
-	return set
+	fmt.Printf(">>> [Init] 已加载 %d 条排除域名规则 (%d exacts, %d wildcards)\n", len(set)+len(wildcards), len(set), len(wildcards))
+	return set, wildcards
+}
+
+// Why: Helper to check if domain is subdomain of parent; enables accurate filtering for compressed invalids.
+func isSubdomainOf(domain, parent string) bool {
+	if domain == parent {
+		return false
+	}
+	return strings.HasSuffix(domain, "."+parent)
 }
 
 // Why: Monitor memory; helps diagnose leaks or high usage during long runs.
