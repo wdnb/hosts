@@ -306,39 +306,63 @@ func extractDomain(rule string) string {
 	return ""
 }
 
-func isDomainAlive(domain string, availableChina, availableGlobal []string, limiters map[string]*rate.Limiter) bool {
-	lists := [][]string{availableChina, availableGlobal}
-	initialIdx := rand.Intn(2)
-	if tryList(lists[initialIdx], domain, limiters) {
-		return true
+func isDefinitelyNXDomain(err error) bool {
+	if err == nil {
+		return false
 	}
-	return tryList(lists[1-initialIdx], domain, limiters)
+	dnsErr, ok := err.(*net.DNSError)
+	if !ok {
+		return false
+	}
+	return dnsErr.IsNotFound || strings.Contains(strings.ToLower(err.Error()), "no such host")
 }
 
-func tryList(servers []string, domain string, limiters map[string]*rate.Limiter) bool {
-	if len(servers) == 0 {
-		return false
+func isDomainAlive(domain string, availableChina, availableGlobal []string, limiters map[string]*rate.Limiter) bool {
+	// 合并所有可用 DNS，随机打乱更均匀
+	allServers := append(availableChina[:], availableGlobal...)
+	if len(allServers) == 0 {
+		return true // 没 DNS 可用时保守保留
 	}
-	idx := rand.Intn(len(servers))
-	server := servers[idx]
+	rand.Shuffle(len(allServers), func(i, j int) { allServers[i], allServers[j] = allServers[j], allServers[i] })
 
-	limiter := limiters[server]
-	if err := limiter.Wait(context.Background()); err != nil {
-		return false
+	// 最多尝试 3 次（足够避免单点抖动）
+	for i := 0; i < 3 && i < len(allServers); i++ {
+		server := allServers[i]
+
+		// 限速
+		if limiter := limiters[server]; limiter != nil {
+			_ = limiter.Wait(context.Background()) // 忽略限速错误
+		}
+
+		// 关键：这里必须用 &net.Dialer{} 取地址
+		resolver := &net.Resolver{
+			PreferGo: true,
+			Dial: func(ctx context.Context, network, _ string) (net.Conn, error) {
+				d := &net.Dialer{Timeout: DNSTimeout} // 必须加 &
+				return d.DialContext(ctx, "udp", server)
+			},
+		}
+
+		ctx, cancel := context.WithTimeout(context.Background(), DNSTimeout)
+		ips, err := resolver.LookupHost(ctx, domain)
+		cancel()
+
+		// 1. 成功解析到 IP → 一定活的
+		if err == nil && len(ips) > 0 {
+			return true
+		}
+
+		// 2. 明确是 NXDomain → 继续尝试下一个 DNS
+		if err != nil && isDefinitelyNXDomain(err) {
+			continue
+		}
+
+		// 3. 其他所有情况（超时、ServFail、网络错误、临时失败等）→ 保守认为可能活的
+		return true
 	}
 
-	resolver := &net.Resolver{
-		PreferGo: true,
-		Dial: func(ctx context.Context, network, address string) (net.Conn, error) {
-			d := net.Dialer{Timeout: DNSTimeout}
-			return d.DialContext(ctx, "udp", server)
-		},
-	}
-
-	ctx, cancel := context.WithTimeout(context.Background(), DNSTimeout)
-	defer cancel()
-	ips, err := resolver.LookupHost(ctx, domain)
-	return err == nil && len(ips) > 0
+	// 只有连续 3 次都明确返回 NXDomain，才最终判定为无效域名
+	return false
 }
 
 func writeInvalidToFile(filename string, domains []string) error {
