@@ -37,7 +37,7 @@ const (
 	BlockingIP              = "0.0.0.0"
 	DNSTimeout              = 1000 * time.Millisecond
 	TestDomain              = "t.cn"
-	MaxDNSConcurrency       = 500
+	MaxDNSConcurrency       = 1000
 	QPSPerServer            = 200
 	BurstPerServer          = 200
 	DebugInvalidSourcesFile = "debug_invalid_sources.txt"
