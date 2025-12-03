@@ -51,16 +51,21 @@ const (
 // 我们不依赖单一地区的解析结果。通过混合列表并随机选择，可以避免因单一地区网络波动
 // 或特定运营商污染导致的误判，同时利用全球 CDN 节点的响应速度。
 var DefaultDNSList = []string{
-	// China
-	"223.5.5.5:53", "223.6.6.6:53", "114.114.114.114:53", "114.114.115.115:53",
-	"180.76.76.76:53", "119.29.29.29:53", "182.254.116.116:53",
-	// Global
-	"1.1.1.1:53", "1.0.0.1:53", "8.8.8.8:53", "8.8.4.4:53",
-	"9.9.9.9:53", "149.112.112.112:53", "208.67.222.222:53", "208.67.220.220:53",
-	"94.140.14.140:53", "94.140.14.141:53", // AdGuard
-	"76.76.2.0:53", "76.76.10.0:53", // ControlD
-	"185.222.222.222:53", "45.11.45.11:53", // DNS.SB
-	"80.80.80.80:53", "80.80.81.81:53", // Freenom
+	// Global unfiltered (no malware/ad/tracking blocking)
+	"1.1.1.1:53", "1.0.0.1:53", // Cloudflare DNS (neutral, no filtering)
+	"8.8.8.8:53", "8.8.4.4:53", // Google Public DNS (neutral, no filtering)
+	"9.9.9.10:53", "149.112.112.10:53", // Quad9 (unfiltered/malware-off variant)
+	"208.67.222.2:53", "208.67.220.2:53", // Cisco OpenDNS Sandbox (unfiltered)
+	"94.140.14.140:53", "94.140.14.141:53", // AdGuard DNS Non-filtering
+	"76.76.2.0:53", "76.76.10.0:53", // ControlD Unfiltered
+	"156.154.70.1:53", "156.154.71.1:53", // Neustar/UltraDNS Reliability & Performance 1 (neutral)
+	"156.154.70.5:53", "156.154.71.5:53", // Neustar/UltraDNS Reliability & Performance 2 (neutral, no NXDomain redirection)
+	"77.88.8.8:53", "77.88.8.1:53", // Yandex DNS Basic (no filtering)
+	"86.54.11.100:53", "86.54.11.200:53", // DNS4EU Unfiltered
+	"185.222.222.222:53", "45.11.45.11:53", // DNS.SB (neutral, no filtering)
+	"80.80.80.80:53", "80.80.81.81:53", // Freenom World (neutral)
+	"64.6.64.6:53", "64.6.65.6:53", // Verisign Public DNS (neutral)
+	"74.82.42.42:53", // Hurricane Electric (neutral)
 }
 
 var (
@@ -393,20 +398,52 @@ func parseLineToDomain(line string) string {
 	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
 		return ""
 	}
-	// 性能优化：优先匹配最常见的 hosts 格式 (0.0.0.0 domain)，因为正则回溯开销较大。
+	var domain string
 	if matches := hostRegex.FindStringSubmatch(line); len(matches) == 2 {
-		domain := matches[1]
-		if domain != "localhost" && domain != "local" && strings.Contains(domain, ".") {
-			return domain
+		domain = matches[1]
+	} else if matches := domainRegex.FindStringSubmatch(line); len(matches) == 2 {
+		domain = matches[1]
+	}
+	if domain == "" {
+		return ""
+	}
+	// Add reference-inspired validation
+	domain = strings.Trim(domain, "./")
+	if domain == "localhost" || domain == "local" || !strings.Contains(domain, ".") {
+		return ""
+	}
+	if !validRulePattern.MatchString(domain) {
+		return ""
+	}
+	// For non-wildcard, check strict DNS validity (skip if wildcard for AdBlock compatibility)
+	if !strings.Contains(domain, "*") && !isValidDNSDomain(domain) {
+		return ""
+	}
+	return domain
+}
+
+// Add these helpers from reference (adjusted for your context)
+var validRulePattern = regexp.MustCompile(`^[a-z0-9.\-_*]+$`)
+
+func isValidDNSDomain(domain string) bool {
+	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
+		return false
+	}
+	parts := strings.Split(domain, ".")
+	for _, p := range parts {
+		if len(p) == 0 || len(p) > 63 {
+			return false
+		}
+		if strings.HasPrefix(p, "-") || strings.HasSuffix(p, "-") {
+			return false
+		}
+		for _, c := range p {
+			if !((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-') {
+				return false
+			}
 		}
 	}
-	if matches := domainRegex.FindStringSubmatch(line); len(matches) == 2 {
-		domain := matches[1]
-		if domain != "localhost" && domain != "local" && strings.Contains(domain, ".") {
-			return domain
-		}
-	}
-	return ""
+	return true
 }
 
 func writeInvalidToFile(filename string, domains []string) error {
