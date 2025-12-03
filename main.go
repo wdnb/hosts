@@ -60,10 +60,10 @@ func main() {
 	}
 	// Use concurrency for downloading to speed up collection from multiple sources.
 	var (
-		blackRaw = make(map[string]struct{})
-		debugLog = make([]DebugEntry, 0)
-		mu       sync.Mutex
-		wg       sync.WaitGroup
+		blackSources = make(map[string]map[string]bool)
+		debugLog     = make([]DebugEntry, 0)
+		mu           sync.Mutex
+		wg           sync.WaitGroup
 	)
 	sem := make(chan struct{}, MaxGoroutines)
 	totalUrls := len(urls)
@@ -80,9 +80,13 @@ func main() {
 			}
 			// Process each source, filtering invalid domains to maintain list integrity.
 			validBlack, invalid := downloadAndProcess(u, invalidSet)
+			l := path.Base(u)
 			mu.Lock()
 			for _, r := range validBlack {
-				blackRaw[r] = struct{}{}
+				if _, ok := blackSources[r]; !ok {
+					blackSources[r] = make(map[string]bool)
+				}
+				blackSources[r][l] = true
 			}
 			// Limit debug log size to prevent excessive memory use on large error sets.
 			if len(debugLog) < 1000000 {
@@ -93,13 +97,13 @@ func main() {
 	}
 	wg.Wait()
 	printMemUsage()
-	totalRaw := len(blackRaw)
+	totalRaw := len(blackSources)
 	fmt.Printf(">>> [Phase 1 Done] 初筛后规则总数: %d | 耗时: %v\n", totalRaw, time.Since(start))
 	// Optimize rules to reduce redundancy, improving performance in ad-blockers.
 	fmt.Println(">>> [Phase 2] 执行高级规则优化 (通配符剪枝 & 子域名剔除)...")
 	wildcardsBlack := make([]string, 0)
 	exactsBlack := make([]string, 0)
-	for r := range blackRaw {
+	for r := range blackSources {
 		if strings.Contains(r, "*") {
 			wildcardsBlack = append(wildcardsBlack, r)
 		} else {
@@ -129,6 +133,29 @@ func main() {
 	}
 	// Append optimization logs to main debug for comprehensive tracking.
 	debugLog = append(debugLog, prunedLog...)
+	// Compute discarded statistics excluding optimizations
+	discardedBySource := make(map[string]int)
+	for _, entry := range debugLog {
+		if entry.Source != "optimization" {
+			discardedBySource[entry.Source]++
+		}
+	}
+	// Compute rule contribution statistics
+	finalBlack := make(map[string]struct{})
+	for _, r := range wildcardsBlack {
+		finalBlack[r] = struct{}{}
+	}
+	for _, r := range optimizedExactsBlack {
+		finalBlack[r] = struct{}{}
+	}
+	sourceContribution := make(map[string]int)
+	for rule := range finalBlack {
+		if sources, ok := blackSources[rule]; ok {
+			for src := range sources {
+				sourceContribution[src]++
+			}
+		}
+	}
 	// Write AdGuard-compatible file for broad ad-blocker support.
 	writeResultFile(OutputFile, blackList)
 	// Generate hosts file only with valid exact domains for DNS-level blocking.
@@ -141,7 +168,7 @@ func main() {
 	sort.Strings(hostsLines)
 	writeHostsFile(HostsOutputFile, hostsLines)
 	// Save debug logs to facilitate review of discarded rules.
-	writeDebugFile(DebugFile, debugLog)
+	writeDebugFile(DebugFile, debugLog, discardedBySource, sourceContribution, len(finalBlack))
 	fmt.Println("---------------------------------------------------------")
 	fmt.Printf(">>> 全部完成!\n")
 	fmt.Printf(">>> 最终 AdGuard 规则数: %d\n", len(blackList))
@@ -256,17 +283,18 @@ func removeSubdomains(domains []string, prunedLog *[]DebugEntry) ([]string, int)
 // 核心逻辑 (清洗与校验)
 // -----------------------------------------------------------------------------
 func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack []string, invalid []DebugEntry) {
+	l := path.Base(url)
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", UserAgent)
 	resp, err := client.Do(req)
 	if err != nil {
-		invalid = append(invalid, DebugEntry{Source: url, Line: "Network", Reason: err.Error()})
+		invalid = append(invalid, DebugEntry{Source: l, Line: "Network", Reason: err.Error()})
 		return
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != 200 {
-		invalid = append(invalid, DebugEntry{Source: url, Line: "Status", Reason: fmt.Sprint(resp.StatusCode)})
+		invalid = append(invalid, DebugEntry{Source: l, Line: "Status", Reason: fmt.Sprint(resp.StatusCode)})
 		return
 	}
 	scanner := bufio.NewScanner(resp.Body)
@@ -279,7 +307,6 @@ func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack 
 			continue
 		}
 		clean, isWhite, reason := normalizeLine(line)
-		l := path.Base(url)
 		if clean == "" {
 			if len(line) > 5 {
 				invalid = append(invalid, DebugEntry{Source: l, Line: trimLong(line), Reason: reason})
@@ -496,7 +523,7 @@ func writeHostsFile(filename string, lines []string) {
 }
 
 // Sorts and writes debug logs for organized review.
-func writeDebugFile(filename string, logs []DebugEntry) {
+func writeDebugFile(filename string, logs []DebugEntry, discardedBySource map[string]int, sourceContribution map[string]int, totalFinal int) {
 	if len(logs) == 0 {
 		return
 	}
@@ -509,6 +536,52 @@ func writeDebugFile(filename string, logs []DebugEntry) {
 	w := bufio.NewWriter(f)
 	fmt.Fprintf(w, "# Debug Log\n# Updated: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(w, "# Total Entries: %d\n\n", len(logs))
+
+	// Write discarded statistics
+	fmt.Fprintln(w, "# Discarded Statistics by Upstream Source (excluding optimizations)")
+	type srcCount struct {
+		src string
+		cnt int
+	}
+	var discardedList []srcCount
+	for s, c := range discardedBySource {
+		discardedList = append(discardedList, srcCount{src: s, cnt: c})
+	}
+	sort.Slice(discardedList, func(i, j int) bool {
+		return discardedList[i].cnt > discardedList[j].cnt
+	})
+	for _, sc := range discardedList {
+		fmt.Fprintf(w, "# %s: %d\n", sc.src, sc.cnt)
+	}
+	fmt.Fprintln(w)
+
+	// Write contribution statistics
+	fmt.Fprintln(w, "# Rule Contribution by Upstream Source")
+	var contribList []struct {
+		src string
+		cnt int
+		pct float64
+	}
+	for s, c := range sourceContribution {
+		pct := 0.0
+		if totalFinal > 0 {
+			pct = float64(c) / float64(totalFinal) * 100
+		}
+		contribList = append(contribList, struct {
+			src string
+			cnt int
+			pct float64
+		}{src: s, cnt: c, pct: pct})
+	}
+	sort.Slice(contribList, func(i, j int) bool {
+		return contribList[i].cnt > contribList[j].cnt
+	})
+	for _, sc := range contribList {
+		fmt.Fprintf(w, "# %s: %d (%.2f%%)\n", sc.src, sc.cnt, sc.pct)
+	}
+	fmt.Fprintln(w, "\n# Detailed Logs")
+
+	// Write sorted detailed logs
 	sort.Slice(logs, func(i, j int) bool {
 		if logs[i].Reason != logs[j].Reason {
 			return logs[i].Reason < logs[j].Reason

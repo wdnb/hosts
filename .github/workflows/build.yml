@@ -27,7 +27,7 @@ jobs:
       
       # --- ⬇️ 关键新增步骤：下载 VPS 文件 ⬇️ ---
       - name: 🔐 Set up SSH Private Key
-        uses: webfactory/ssh-agent@v0.9.0
+        uses: webfactory/ssh-agent@v0.9.1
         with:
           # 从 Secret 中加载私钥，用于连接 VPS
           ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}

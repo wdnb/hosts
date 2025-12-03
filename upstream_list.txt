@@ -18,8 +18,6 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_69.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt
 #Dandelion Sprout's Game Console Adblock List
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt
-#HaGeZi's Allowlist Referral
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_45.txt
 #HaGeZi's Apple Tracker Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt
 #HaGeZi's Gambling Blocklist
