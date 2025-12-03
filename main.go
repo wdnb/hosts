@@ -135,9 +135,13 @@ func main() {
 	debugLog = append(debugLog, prunedLog...)
 	// Compute discarded statistics excluding optimizations
 	discardedBySource := make(map[string]int)
+	discardedByReason := make(map[string]int)
+	totalDiscarded := 0
 	for _, entry := range debugLog {
 		if entry.Source != "optimization" {
 			discardedBySource[entry.Source]++
+			discardedByReason[entry.Reason]++
+			totalDiscarded++
 		}
 	}
 	// Compute rule contribution statistics
@@ -168,7 +172,7 @@ func main() {
 	sort.Strings(hostsLines)
 	writeHostsFile(HostsOutputFile, hostsLines)
 	// Save debug logs to facilitate review of discarded rules.
-	writeDebugFile(DebugFile, debugLog, discardedBySource, sourceContribution, len(finalBlack))
+	writeDebugFile(DebugFile, debugLog, discardedBySource, discardedByReason, totalDiscarded, sourceContribution, len(finalBlack))
 	fmt.Println("---------------------------------------------------------")
 	fmt.Printf(">>> 全部完成!\n")
 	fmt.Printf(">>> 最终 AdGuard 规则数: %d\n", len(blackList))
@@ -523,7 +527,7 @@ func writeHostsFile(filename string, lines []string) {
 }
 
 // Sorts and writes debug logs for organized review.
-func writeDebugFile(filename string, logs []DebugEntry, discardedBySource map[string]int, sourceContribution map[string]int, totalFinal int) {
+func writeDebugFile(filename string, logs []DebugEntry, discardedBySource map[string]int, discardedByReason map[string]int, totalDiscarded int, sourceContribution map[string]int, totalFinal int) {
 	if len(logs) == 0 {
 		return
 	}
@@ -537,7 +541,25 @@ func writeDebugFile(filename string, logs []DebugEntry, discardedBySource map[st
 	fmt.Fprintf(w, "# Debug Log\n# Updated: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(w, "# Total Entries: %d\n\n", len(logs))
 
-	// Write discarded statistics
+	// Write discarded statistics by reason
+	fmt.Fprintf(w, "# Discarded Statistics by Reason (excluding optimizations) - Total: %d\n", totalDiscarded)
+	type reasonCount struct {
+		reason string
+		cnt    int
+	}
+	var discardedReasonList []reasonCount
+	for r, c := range discardedByReason {
+		discardedReasonList = append(discardedReasonList, reasonCount{reason: r, cnt: c})
+	}
+	sort.Slice(discardedReasonList, func(i, j int) bool {
+		return discardedReasonList[i].cnt > discardedReasonList[j].cnt
+	})
+	for _, rc := range discardedReasonList {
+		fmt.Fprintf(w, "# %s: %d\n", rc.reason, rc.cnt)
+	}
+	fmt.Fprintln(w)
+
+	// Write discarded statistics by source
 	fmt.Fprintln(w, "# Discarded Statistics by Upstream Source (excluding optimizations)")
 	type srcCount struct {
 		src string
