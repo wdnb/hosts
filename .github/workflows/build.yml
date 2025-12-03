@@ -5,50 +5,62 @@ on:
   schedule:
     - cron: '0 16 * * *'
   workflow_dispatch:
+
 permissions:
   contents: write # 授予默认 GITHUB_TOKEN 对仓库内容的写入权限，使其可以 push
+
 jobs:
   build-and-deploy:
     runs-on: ubuntu-latest
     
     steps:
       # 1. 检出代码
-      - name: Checkout repository
+      - name: 📦 Checkout repository
         uses: actions/checkout@v6
 
       # 2. 设置 Go 环境
-      - name: Set up Go
+      - name: ⚙️ Set up Go
         uses: actions/setup-go@v6
         with:
           go-version: 'stable' 
+      
+      # --- ⬇️ 关键新增步骤：下载 VPS 文件 ⬇️ ---
+      - name: 🔐 Set up SSH Private Key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          # 从 Secret 中加载私钥，用于连接 VPS
+          ssh-private-key: ${{ secrets.SSH_PRIVATE_KEY }}
+          
+      - name: ⬇️ Download invalid_domains.txt via SCP
+        # 将文件下载到当前工作目录，以便 Go 程序可以读取
+        run: |
+          # 下载到 Action 运行时：./invalid_domains.txt
+          scp -o StrictHostKeyChecking=no \
+            ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/home/ ${{ secrets.VPS_USERNAME }}/hosts_repo/invalid_domains.txt \
+            ./invalid_domains.txt
+      # --- ⬆️ 关键新增步骤：下载 VPS 文件 ⬆️ ---
 
       # 3. 构建并运行 Go 程序
-      - name: Build and Run Go Program
+      - name: 🚀 Build and Run Go Program
         run: |
+          # 确保您的 Go 程序能够读取当前目录下的 invalid_domains.txt 文件
           go build -o adblock-aggregator main.go
           ./adblock-aggregator
-          # 运行后将生成 txt 文件
+          # 运行后将生成 adblock_lite.txt 等文件
 
       # 4. 提交更改回仓库
-      - name: Commit and Push new list
+      - name: 📤 Commit and Push new list
         run: |
-          # 1. 配置 Git 用户信息
           git config --global user.name 'github-actions[bot]'
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
-          # 2. 强制追踪并添加新生成的文件
+          # 注意：这里需要确保您的 Go 程序不再需要的旧文件名
           git add -f adblock_lite.txt adblock_debug.txt adaway_hosts.txt
           
-          # 3. 检查是否有实际的更改（防止空提交）
           if ! git diff --cached --exit-code --quiet; then
-              echo "发现 adblock_lite.txt 存在更改，开始提交..."
-              
-              # 4. 提交更改
+              echo "发现 adblock 列表存在更改，开始提交..."
               git commit -m "🤖 Feat: Update aggregated adblock list (Daily Run)"
-              
-              # 5. 推送更改到 GitHub
-              # 使用 GITHUB_TOKEN 认证进行推送
               git push https://${{ secrets.GITHUB_TOKEN }}@github.com/${{ github.repository }}
           else
-              echo "文件 adblock_lite.txt 内容与上次提交相同，跳过提交。"
+              echo "文件内容与上次提交相同，跳过提交。"
           fi
