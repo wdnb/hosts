@@ -24,14 +24,12 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_67.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_47.txt
 #HaGeZi's OPPO & Realme Tracker Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_66.txt
-#Malicious URL Blocklist (URLHaus)
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt
+
 #HaGeZi's Samsung Tracker Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_61.txt
 #uBlock₀ filters – Badware risks
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt
-#The Big List of Hacked Malware Web Sites
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
+
 #Stalkerware Indicators List
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
 #ShadowWhisperer's Malware List
@@ -40,8 +38,6 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt
 #HaGeZi's Vivo Tracker Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_65.txt
-#Phishing Army
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt
 #HaGeZi's Windows/Office Tracker Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_63.txt
 #HaGeZi's Xiaomi Tracker Blocklist
@@ -70,3 +66,23 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_56.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
 #Peter Lowe's Block List Ads
 https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&mimetype=plaintext
+
+##########################不活跃上游##########################
+
+#Phishing Army 
+# Source: filter_18.txt
+#   invalid_domains: 66490
+# filter_18.txt: Total=159870 | Accepted=93370 | Discarded=66490 (41.59%) | Contribution=93370 (8.32% of final) | Unique=26987 (28.90% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt
+
+#Malicious URL Blocklist (URLHaus)
+# Source: filter_11.txt
+#   invalid_domains: 8836
+# filter_11.txt: Total=13291 | Accepted=4446 | Discarded=8836 (66.48%) | Contribution=4446 (0.40% of final) | Unique=1600 (35.99% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt
+
+#The Big List of Hacked Malware Web Sites
+# Source: filter_9.txt
+#   invalid_domains: 6183
+# filter_9.txt: Total=13477 | Accepted=7284 | Discarded=6184 (45.89%) | Contribution=7284 (0.65% of final) | Unique=6986 (95.91% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
