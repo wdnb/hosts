@@ -24,46 +24,56 @@ const (
 	UserAgent       = "AdGuard-HostlistCompiler-Go/2.0-Optimized"
 	UpstreamListURL = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/main/upstream_list.txt"
 
-	// 性能调优参数
-	// 压榨性能：提高并发数，依赖 RateLimiter 进行流控
+	// --- 性能与并发调优 ---
+	// 为什么设置 5000 并发？
+	// DNS 请求是 IO 密集型而非 CPU 密集型。我们需要大量的 Goroutine 来填满
+	// DNS 服务器响应的 RTT (Round Trip Time) 空隙，从而最大化吞吐量。
+	// 实际流量由 RateLimiter 控制，不会导致洪水攻击。
 	MaxConcurrency = 5000
-	// 缩短超时时间，快速失败重试
+
+	// 为什么是 800ms？
+	// 绝大多数正常的 DNS 响应都在 200ms 内。
+	// 设置过长的超时会导致 Worker 被慢速服务器卡住，降低整体处理速度。
+	// 我们宁愿快速失败并重试另一个服务器，也不愿长时间等待。
 	DNSTimeout = 800 * time.Millisecond
+
 	TestDomain = "google.com"
-	// 针对公共 DNS，适当保守以免被封禁，但总量足够大
+
+	// 为什么限制 QPS？
+	// 公共 DNS 通常有防滥用机制。如果不加限制，我们的 IP 会被暂时封禁（返回 REFUSED）。
+	// 150 QPS 是一个在速度和稳定性之间的平衡值。
 	QPSPerServer   = 150
 	BurstPerServer = 200
 )
 
-// DNS 服务器列表保持不变...
-var chinaDNS = []string{
+// DefaultDNSList 包含国内外混合的高可用 DNS。
+// 为什么混合？
+// 我们不依赖单一地区的解析结果。通过混合列表并随机选择，可以避免因单一地区网络波动
+// 或特定运营商污染导致的误判，同时利用全球 CDN 节点的响应速度。
+var DefaultDNSList = []string{
+	// China
 	"223.5.5.5:53", "223.6.6.6:53", "114.114.114.114:53", "114.114.115.115:53",
 	"180.76.76.76:53", "119.29.29.29:53", "182.254.116.116:53",
-}
-
-var globalDNS = []string{
+	// Global
 	"1.1.1.1:53", "1.0.0.1:53", "8.8.8.8:53", "8.8.4.4:53",
 	"9.9.9.9:53", "149.112.112.112:53", "208.67.222.222:53", "208.67.220.220:53",
-	"94.140.14.140:53", "94.140.14.141:53",
-	"208.67.222.2:53", "208.67.220.2:53",
-	"76.76.2.0:53", "76.76.10.0:53",
-	"185.222.222.222:53", "45.11.45.11:53",
-	"54.174.40.213:53", "52.3.100.184:53",
-	"216.146.35.35:53", "216.146.36.36:53",
-	"80.80.80.80:53", "80.80.81.81:53",
-	"74.82.42.42:53",
+	"94.140.14.140:53", "94.140.14.141:53", // AdGuard
+	"76.76.2.0:53", "76.76.10.0:53", // ControlD
+	"185.222.222.222:53", "45.11.45.11:53", // DNS.SB
+	"80.80.80.80:53", "80.80.81.81:53", // Freenom
 }
 
 var (
+	// 为什么用两个正则？
+	// 能够同时兼容 "/etc/hosts" 格式 (0.0.0.0 domain) 和 AdBlock 格式 (||domain^)。
 	domainRegex = regexp.MustCompile(`^(?:\|\|)?([a-zA-Z0-9.-]+)(?:\^)?$`)
 	hostRegex   = regexp.MustCompile(`^(?:0\.0\.0\.0|127\.0\.0\.1)\s+([a-zA-Z0-9.-]+)`)
 )
 
-// Shared DNS Client to reuse sockets where possible and reduce GC
+// 复用 client 以减少 socket 创建销毁的系统调用开销和 GC 压力
 var dnsClient = &dns.Client{
 	Timeout: DNSTimeout,
 	Net:     "udp",
-	// 禁用 UDP 大小检查，追求速度
 	UDPSize: 4096,
 }
 
@@ -72,7 +82,7 @@ func main() {
 	start := time.Now()
 	fmt.Println(">>> [Init] 开始规则清洗与高性能 DNS 检测...")
 
-	// 1. 获取上游
+	// 1. 获取上游规则源
 	upstreams, err := fetchUpstreamList(UpstreamListURL)
 	if err != nil || len(upstreams) == 0 {
 		fmt.Printf("!!! [Error] 无法获取上游源列表: %v\n", err)
@@ -80,25 +90,26 @@ func main() {
 	}
 	fmt.Printf(">>> [Source] 成功加载 %d 个源\n", len(upstreams))
 
-	// 2. 检测并筛选可用 DNS
+	// 2. 预检 DNS 服务器
+	// 为什么要在开始前检查？
+	// 避免将损坏的或不可达的 DNS 服务器加入池中，这会浪费重试次数并拖慢整体扫描速度。
 	fmt.Println(">>> [DNS] 正在筛选可用 DNS 服务器...")
-	availableChina := filterAvailableDNS(chinaDNS)
-	availableGlobal := filterAvailableDNS(globalDNS)
+	validDNS := filterAvailableDNS(DefaultDNSList)
 
-	totalServers := len(availableChina) + len(availableGlobal)
-	if totalServers == 0 {
-		fmt.Println("!!! [Error] 无任何可用 DNS 服务器，请检查网络")
+	if len(validDNS) == 0 {
+		fmt.Println("!!! [Error] 无任何可用 DNS 服务器，请检查网络连接")
 		os.Exit(1)
 	}
-	fmt.Printf(">>> [DNS] 可用服务器: China=%d, Global=%d, Total=%d\n", len(availableChina), len(availableGlobal), totalServers)
+	fmt.Printf(">>> [DNS] 存活服务器: %d 个\n", len(validDNS))
 
 	// 3. 初始化限流器
+	// 为每个 DNS 服务器分配独立的令牌桶，确保单个服务器的负载均衡，防止被特定服务商封禁。
 	limiters := make(map[string]*rate.Limiter)
-	for _, s := range append(availableChina, availableGlobal...) {
+	for _, s := range validDNS {
 		limiters[s] = rate.NewLimiter(rate.Limit(QPSPerServer), BurstPerServer)
 	}
 
-	// 4. 下载去重
+	// 4. 下载并去重规则
 	ruleSources := downloadAndDeduplicate(upstreams)
 	fmt.Printf(">>> [Rules] 唯一规则数: %d\n", len(ruleSources))
 
@@ -107,10 +118,11 @@ func main() {
 		rules = append(rules, r)
 	}
 
-	// 5. 核心：高并发 DNS 验证
-	invalidDomains, invalidSources := checkDomainsForInvalid(rules, availableChina, availableGlobal, limiters, ruleSources)
+	// 5. 执行核心检测
+	invalidDomains, invalidSources := checkDomainsForInvalid(rules, validDNS, limiters, ruleSources)
 
-	// 6. 输出结果
+	// 6. 结果输出
+	// 对结果排序，保证每次运行生成的 diff 最小化，便于 Git 版本控制。
 	sort.Strings(invalidDomains)
 	if err := writeInvalidToFile(OutputFile, invalidDomains); err != nil {
 		fmt.Printf("!!! [Error] 写入失败: %v\n", err)
@@ -124,9 +136,8 @@ func main() {
 	fmt.Printf("\n>>> [Done] 总耗时: %v | 无效域名: %d | 有效保留: %d\n", time.Since(start), len(invalidDomains), len(rules)-len(invalidDomains))
 }
 
-// ---------------------- DNS 核心逻辑 (重构部分) ----------------------
+// ---------------------- DNS 核心逻辑 ----------------------
 
-// filterAvailableDNS 使用 miekg/dns 进行快速握手检测
 func filterAvailableDNS(servers []string) []string {
 	var available []string
 	var mu sync.Mutex
@@ -136,7 +147,7 @@ func filterAvailableDNS(servers []string) []string {
 		wg.Add(1)
 		go func(server string) {
 			defer wg.Done()
-			// 严格检查：必须能解析 google.com 且返回 NOERROR
+			// 严格模式：只有当 DNS 服务器能正确解析标杆域名 (google.com) 时才视为可用。
 			if checkDNSServerStrict(server) {
 				mu.Lock()
 				available = append(available, server)
@@ -151,52 +162,49 @@ func filterAvailableDNS(servers []string) []string {
 func checkDNSServerStrict(server string) bool {
 	m := new(dns.Msg)
 	m.SetQuestion(dns.Fqdn(TestDomain), dns.TypeA)
-	// 使用一次性 client 避免污染全局配置，但复用超时逻辑
+	// 使用一次性 client 避免并发干扰，但复用超时配置
 	c := &dns.Client{Timeout: DNSTimeout, Net: "udp"}
 	r, _, err := c.Exchange(m, server)
 
-	// 逻辑完备性：必须没有网络错误，且 Rcode 为 Success，且有 Answer
+	// 逻辑完备性检查：
+	// 1. err == nil: 网络通畅。
+	// 2. r.Rcode == Success: 服务器状态正常（非 REFUSED/SERVFAIL）。
+	// 3. len(r.Answer) > 0: 服务器没有对标杆域名进行劫持或过滤（返回空 IP）。
 	if err == nil && r != nil && r.Rcode == dns.RcodeSuccess && len(r.Answer) > 0 {
 		return true
 	}
 	return false
 }
 
-func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []string, limiters map[string]*rate.Limiter, ruleSources map[string]map[string]struct{}) ([]string, map[string][]string) {
+func checkDomainsForInvalid(rules []string, dnsServers []string, limiters map[string]*rate.Limiter, ruleSources map[string]map[string]struct{}) ([]string, map[string][]string) {
 	var invalid []string
 	invalidSources := make(map[string][]string)
 	var mu sync.Mutex
 
-	// 任务通道
-	jobs := make(chan string, 10000) // 增大 buffer 防止阻塞
+	jobs := make(chan string, 10000)
 	var wg sync.WaitGroup
-
-	// 进度条计数
 	var processed int64
 	total := int64(len(rules))
 
-	// 启动高并发 Worker
-	// 这里的并发数不仅是本地 CPU 的并发，更是为了填满 DNS 服务器的 RTT 等待时间
+	// 启动 Worker 池
 	for i := 0; i < MaxConcurrency; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-
-			// 预分配 Message 对象，在循环中 Reset，减少内存分配
+			// 在循环外分配 Msg 对象，循环内 Reset，极大减少内存分配频率 (GC 优化)
 			m := new(dns.Msg)
 
 			for domain := range jobs {
-				// isDomainDead 返回 true 表示确定已死 (NXDOMAIN)
-				// 返回 false 表示活着或者无法确定（保守保留）
-				if isDomainDead(domain, availableChina, availableGlobal, limiters, m) {
+				// 只有当 isDomainDead 明确返回 true 时，才将其加入无效列表。
+				// 任何不确定性（超时、服务器拒绝）都默认为“域名存活”，遵循 Fail-Safe 原则。
+				if isDomainDead(domain, dnsServers, limiters, m) {
 					mu.Lock()
 					invalid = append(invalid, domain)
-					// 记录来源用于 Debug
+					// 仅在确认无效时才进行来源数据的聚合操作
 					sources := make([]string, 0, len(ruleSources[domain]))
 					for u := range ruleSources[domain] {
 						sources = append(sources, u)
 					}
-					// 仅在 debug 输出时排序，减少锁内耗时
 					invalidSources[domain] = sources
 					mu.Unlock()
 				}
@@ -216,7 +224,7 @@ func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []st
 	wg.Wait()
 	fmt.Println()
 
-	// 最后再对 debug source 进行一次整体排序，避免在并发锁中进行
+	// 统一在最后进行排序，避免在 Worker 锁中进行 O(N*logN) 操作，减少锁竞争时间
 	for k := range invalidSources {
 		sort.Strings(invalidSources[k])
 	}
@@ -224,98 +232,74 @@ func checkDomainsForInvalid(rules []string, availableChina, availableGlobal []st
 	return invalid, invalidSources
 }
 
-// isDomainDead 判断逻辑核心
-// 返回 true:  确信域名已死 (NXDOMAIN)
-// 返回 false: 域名存活 (NOERROR + Answer) 或 无法确定 (SERVFAIL/REFUSED/TIMEOUT) -> 保守策略: 视为存活
-func isDomainDead(domain string, availableChina, availableGlobal []string, limiters map[string]*rate.Limiter, m *dns.Msg) bool {
-	// 构造完整域名
+// isDomainDead 是判断域名生死的最终仲裁者
+// 返回 true: 确信域名不存在 (NXDOMAIN)。
+// 返回 false: 域名解析成功，或因网络/服务器问题无法确定（保守保留）。
+func isDomainDead(domain string, servers []string, limiters map[string]*rate.Limiter, m *dns.Msg) bool {
 	fqdn := dns.Fqdn(domain)
-
-	// 混合服务器列表，每次随机打乱以负载均衡
-	// 优化：不每次创建新切片，使用随机索引访问
-	allServers := append(availableChina, availableGlobal...) // 这里的 append 仍然有开销，但对于数百万次调用可接受，也可优化为全局 slice
-
-	// 尝试次数：最多尝试 3 个不同的服务器
-	// 如果遇到 REFUSED/SERVFAIL，我们需要换一个服务器再试，不能立即判死
 	maxRetries := 3
 
-	// Fisher-Yates shuffle 的简化版，只随机选前 maxRetries 个
-	perm := rand.Perm(len(allServers))
+	// 为什么要 Shuffle？
+	// 防止“热点效应”。如果所有 Worker 都按顺序请求 Server A，Server A 的限流桶会瞬间耗尽，
+	// 导致大量协程阻塞等待，而 Server B 却闲置。随机化保证了负载在所有可用 DNS 间均匀分布。
+	// 使用 Perm 获取随机索引比每次 copy slice 性能更好。
+	perm := rand.Perm(len(servers))
 
-	nxDomainCount := 0
+	for i := 0; i < maxRetries && i < len(servers); i++ {
+		server := servers[perm[i]]
 
-	for i := 0; i < maxRetries && i < len(allServers); i++ {
-		server := allServers[perm[i]]
-
-		// 1. 获取令牌 (流量整形核心)
+		// 流量控制：严格遵守该 DNS 服务器的速率限制
 		if limiter, ok := limiters[server]; ok {
-			// Wait 会阻塞直到拿到令牌，这是并发控制的关键
 			if err := limiter.Wait(context.Background()); err != nil {
-				continue // 理论上不应发生，除非 context 取消
+				continue
 			}
 		}
 
-		// 2. 构造查询
-		m.SetQuestion(fqdn, dns.TypeA) // 只查 A 记录，最快
-		// 可以在这里加 TypeAAAA 逻辑，但通常广告域名 A 记录没了就是没了
-
-		// 3. 发送请求 (使用全局 client)
+		m.SetQuestion(fqdn, dns.TypeA)
 		r, _, err := dnsClient.Exchange(m, server)
 
-		// 4. 逻辑判决
+		// 1. 网络层错误处理
 		if err != nil {
-			// 网络层面的错误 (Timeout, Network Unreachable, EOF)
-			// 这不代表域名不存在，代表网络或服务器有问题 -> 换个服务器重试
+			// 超时或连接重置。这不代表域名不存在，只能说明当前网络路径不通。
+			// 策略：换一个服务器重试。
 			continue
 		}
 
+		// 2. 协议层响应处理
 		if r == nil {
 			continue
 		}
 
 		switch r.Rcode {
 		case dns.RcodeSuccess:
-			// 即使是 Success，也要看有没有 Answer
-			if len(r.Answer) > 0 {
-				return false // 活着！
-			}
-			// NOERROR 但没有 Answer (NODATA)。
-			// 可能是 CNAME 指向空，或者是仅有 AAAA 记录。
-			// 严格来说这不算 NXDOMAIN，不能删。 -> 视为存活
+			// RcodeSuccess 意味着域名记录存在（即使 Answer 为空，也代表该 Zone 存在）。
+			// 策略：判定为存活，无需再试。
 			return false
 
 		case dns.RcodeNameError:
-			// NXDOMAIN: 权威告知域名不存在。
-			// 为了防止某个递归 DNS 抽风，我们可以选择立即判死，或者计数
-			// 在大批量清洗中，只要有一个可信 DNS 说 NXDOMAIN，通常就是挂了
-			// 激进策略：立即返回 true
-			// return true
-			// 保守策略（可选）：
-			nxDomainCount++
-			if nxDomainCount > 1 {
-				return true
-			}
+			// NXDOMAIN: 权威服务器明确告知域名不存在。
+			// 策略：这是唯一能判死刑的依据。立即返回 true。
+			return true
 
 		case dns.RcodeServerFailure, dns.RcodeRefused:
-			// 服务器挂了或拒绝服务。绝对不能判死。
-			// 必须重试下一个服务器。
+			// SERVFAIL/REFUSED: 目标 DNS 服务器本身出问题或拒绝了我们。
+			// 绝对不能因此认为域名无效。
+			// 策略：必须重试下一个服务器。
 			continue
 
 		default:
-			// 其他错误 (FormatError, NotImplemented 等)，保守处理，视为重试或忽略
+			// 其他罕见错误（如 FormatError），保守起见，视为重试或存活。
 			continue
 		}
 	}
 
-	// 如果循环结束了：
-	// 1. 所有的尝试都 Timeout/Refused 了 -> 无法验证 -> 保守策略：不删 (return false)
-	// 2. 所有的尝试都没有 Answer 但也不是 NXDOMAIN -> 保守策略：不删 (return false)
-
-	// 这里体现了 skepticism：如果我不确定它死了，那它就是活的。
+	// 循环结束仍未返回，说明所有尝试都失败了（全超时或全拒绝）。
+	// 此时我们要问：能确定它死吗？不能。
+	// 策略：疑罪从无，保留域名。
 	return false
 }
 
-// ---------------------- 辅助函数 (基本保持不变或微调) ----------------------
+// ---------------------- 辅助功能 (下载/解析/IO) ----------------------
 
 func fetchUpstreamList(url string) ([]string, error) {
 	client := &http.Client{Timeout: 30 * time.Second}
@@ -331,6 +315,7 @@ func fetchUpstreamList(url string) ([]string, error) {
 	scanner := bufio.NewScanner(resp.Body)
 	for scanner.Scan() {
 		line := strings.TrimSpace(scanner.Text())
+		// 过滤掉注释行和空行
 		if line != "" && !strings.HasPrefix(line, "#") && !strings.HasPrefix(line, "!") {
 			list = append(list, line)
 		}
@@ -343,7 +328,9 @@ func downloadAndDeduplicate(upstreams []string) map[string]map[string]struct{} {
 	var mu sync.Mutex
 	var wg sync.WaitGroup
 
-	// 限制下载并发数，防止带宽占满导致 DNS 失败
+	// 并发控制信号量
+	// 为什么要限制下载并发？
+	// 防止瞬间发起几十个 HTTP 请求导致带宽占满，引发后续的 DNS 初始化检测超时。
 	sem := make(chan struct{}, 5)
 
 	for _, url := range upstreams {
@@ -388,7 +375,7 @@ func downloadAndParse(url string) []string {
 
 	var rules []string
 	scanner := bufio.NewScanner(resp.Body)
-	// 增大 scanner buffer 应对超长行
+	// 扩容 Buffer 以应对某些源文件中可能存在的超长行（虽然罕见，但为了健壮性）
 	buf := make([]byte, 0, 64*1024)
 	scanner.Buffer(buf, 1024*1024)
 
@@ -406,7 +393,7 @@ func parseLineToDomain(line string) string {
 	if line == "" || strings.HasPrefix(line, "#") || strings.HasPrefix(line, "!") {
 		return ""
 	}
-	// 优化：先尝试最常见的 host 格式，再尝试 adblock 格式，减少正则回溯
+	// 性能优化：优先匹配最常见的 hosts 格式 (0.0.0.0 domain)，因为正则回溯开销较大。
 	if matches := hostRegex.FindStringSubmatch(line); len(matches) == 2 {
 		domain := matches[1]
 		if domain != "localhost" && domain != "local" && strings.Contains(domain, ".") {
