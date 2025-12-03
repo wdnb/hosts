@@ -3,7 +3,8 @@ name: AdBlock List Aggregator
 # 1. 设置触发器: 每天定时运行一次
 on:
   schedule:
-    - cron: '0 16 * * *'
+    # 每天北京时间 06:00
+    - cron: '0 22 * * *'
   workflow_dispatch:
 
 permissions:
