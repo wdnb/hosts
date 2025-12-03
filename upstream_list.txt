@@ -64,8 +64,7 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_56.txt
 #AdGuard DNS filter
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
-#Peter Lowe's Block List Ads
-https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&mimetype=plaintext
+
 
 ##########################不活跃上游##########################
 
@@ -86,3 +85,8 @@ https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&mimetype=plaintex
 #   invalid_domains: 6183
 # filter_9.txt: Total=13477 | Accepted=7284 | Discarded=6184 (45.89%) | Contribution=7284 (0.65% of final) | Unique=6986 (95.91% of contrib)
 #https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
+
+##########################已经被包含上游##########################
+#Peter Lowe's Block List Ads
+# serverlist.php?hostformat=hosts&mimetype=plaintext: Total=3495 | Accepted=3434 | Discarded=47 (1.34%) | Contribution=3434 (0.32% of final) | Unique=0 (0.00% of contrib)
+#https://pgl.yoyo.org/adservers/serverlist.php?hostformat=hosts&mimetype=plaintext
