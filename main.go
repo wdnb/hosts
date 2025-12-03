@@ -19,24 +19,25 @@ import (
 // -----------------------------------------------------------------------------
 // 配置与常量
 // -----------------------------------------------------------------------------
+// Constants define fixed values used throughout the program to ensure consistency and ease of maintenance.
 const (
 	OutputFile         = "adblock_lite.txt"
-	HostsOutputFile    = "adaway_hosts.txt" // 新增: AdAway hosts 文件
+	HostsOutputFile    = "adaway_hosts.txt" // Supports AdAway format for compatibility with hosts-based blockers.
 	DebugFile          = "adblock_debug.txt"
-	InvalidDomainsFile = "invalid_domains.txt" // 本地文件，一行一个域名
+	InvalidDomainsFile = "invalid_domains.txt" // Local file listing domains to exclude for security reasons.
 	UserAgent          = "AdGuard-Compiler/4.0 (Go 1.23; Advanced Pruning)"
-	MaxGoroutines      = 16
+	MaxGoroutines      = 16 // Limits concurrency to prevent overwhelming system resources.
 	UpstreamListSource = "https://raw.githubusercontent.com/wdnb/hosts/refs/heads/main/upstream_list.txt"
-	BlockingIP         = "0.0.0.0" // 用于 hosts 文件的阻塞 IP (效率更高)
+	BlockingIP         = "0.0.0.0" // Uses a null IP for blocking in hosts files to efficiently prevent DNS resolution.
 )
 
-// 允许的字符：字母、数字、点、横杠、下划线、星号(通配符)
+// Pattern ensures rules only contain safe characters to avoid injection or parsing errors.
 var validRulePattern = regexp.MustCompile(`^[a-z0-9.\-_*]+$`)
 
 // -----------------------------------------------------------------------------
 // 类型定义
 // -----------------------------------------------------------------------------
-// DebugEntry 记录调试信息
+// DebugEntry captures details of discarded rules to aid in auditing and debugging potential issues.
 type DebugEntry struct {
 	Source string
 	Line   string
@@ -49,18 +50,17 @@ type DebugEntry struct {
 func main() {
 	start := time.Now()
 	printHeader()
-	// 0. 加载排除域名列表
+	// Load invalid domains early to filter out known problematic entries during processing.
 	invalidSet := loadInvalidDomains(InvalidDomainsFile)
-	// 1. 获取上游
+	// Fetch upstream URLs to source rules from reliable, community-maintained lists.
 	urls := fetchUpstreamList(UpstreamListSource)
 	if len(urls) == 0 {
 		fmt.Println("!!! 未获取到上游源，退出")
 		return
 	}
-	// 2. 并发下载与清洗
+	// Use concurrency for downloading to speed up collection from multiple sources.
 	var (
 		blackRaw = make(map[string]struct{})
-		whiteRaw = make(map[string]struct{})
 		debugLog = make([]DebugEntry, 0)
 		mu       sync.Mutex
 		wg       sync.WaitGroup
@@ -74,20 +74,17 @@ func main() {
 			defer wg.Done()
 			sem <- struct{}{}
 			defer func() { <-sem }()
-			// 实时进度打印
+			// Print progress periodically to provide user feedback on long-running operations.
 			if idx > 0 && idx%5 == 0 {
 				fmt.Printf(" -> 下载进度: %d/%d (总耗时: %v)\n", idx, totalUrls, time.Since(start).Round(time.Second))
 			}
-			// 下载并解析，传入 invalidSet 进行过滤
-			validBlack, validWhite, invalid := downloadAndProcess(u, invalidSet)
+			// Process each source, filtering invalid domains to maintain list integrity.
+			validBlack, invalid := downloadAndProcess(u, invalidSet)
 			mu.Lock()
 			for _, r := range validBlack {
 				blackRaw[r] = struct{}{}
 			}
-			for _, r := range validWhite {
-				whiteRaw[r] = struct{}{}
-			}
-			// 仅记录前 100万 条错误日志，防止内存溢出
+			// Limit debug log size to prevent excessive memory use on large error sets.
 			if len(debugLog) < 1000000 {
 				debugLog = append(debugLog, invalid...)
 			}
@@ -96,9 +93,9 @@ func main() {
 	}
 	wg.Wait()
 	printMemUsage()
-	totalRaw := len(blackRaw) + len(whiteRaw)
+	totalRaw := len(blackRaw)
 	fmt.Printf(">>> [Phase 1 Done] 初筛后规则总数: %d | 耗时: %v\n", totalRaw, time.Since(start))
-	// 3. 分类与深度优化 (压缩核心)
+	// Optimize rules to reduce redundancy, improving performance in ad-blockers.
 	fmt.Println(">>> [Phase 2] 执行高级规则优化 (通配符剪枝 & 子域名剔除)...")
 	wildcardsBlack := make([]string, 0)
 	exactsBlack := make([]string, 0)
@@ -109,93 +106,45 @@ func main() {
 			exactsBlack = append(exactsBlack, r)
 		}
 	}
-	wildWhites := make([]string, 0)
-	for w := range whiteRaw {
-		if strings.Contains(w, "*") {
-			wildWhites = append(wildWhites, w)
-		}
-	}
 	optStart := time.Now()
-	// 初始化 prunedLog
+	// Track pruned entries for debugging optimization effectiveness.
 	prunedLog := make([]DebugEntry, 0)
-	// 3a. 通配符剪枝 (解决通配符对纯域名的覆盖问题)
+	// Prune exact domains covered by wildcards to minimize list size without losing coverage.
 	remainingExactsBlack, wildcardPrunedCount := wildcardPruning(exactsBlack, wildcardsBlack, &prunedLog)
-	// 3b. 子域名剔除 (解决父域名对子域名的覆盖问题)
+	// Remove subdomains covered by parents to further compress the list efficiently.
 	optimizedExactsBlack, subdomainPrunedCount := removeSubdomains(remainingExactsBlack, &prunedLog)
 	totalPruned := wildcardPrunedCount + subdomainPrunedCount
 	fmt.Printf(" -> 优化算法总耗时: %v\n", time.Since(optStart))
 	fmt.Printf(" -> 1. 通配符剪枝剔除: %d 条\n", wildcardPrunedCount)
 	fmt.Printf(" -> 2. 子域名剔除: %d 条\n", subdomainPrunedCount)
 	fmt.Printf(" -> 总优化剔除: %d 条 (最终黑名单规则数: %d)\n", totalPruned, len(wildcardsBlack)+len(optimizedExactsBlack))
-	// 4. 生成最终结果
+	// Generate output files for use in AdGuard and AdAway.
 	fmt.Println(">>> [Phase 3] 生成文件...")
 	blackList := make([]string, 0, len(wildcardsBlack)+len(optimizedExactsBlack))
-	for _, w := range wildcardsBlack {
-		if _, ok := whiteRaw[w]; !ok {
-			blackList = append(blackList, fmt.Sprintf("||%s^", w))
-		} else {
-			prunedLog = append(prunedLog, DebugEntry{Source: "optimization", Line: w, Reason: "excluded by exact whitelist"})
-		}
-	}
-	for _, e := range optimizedExactsBlack {
-		if _, ok := whiteRaw[e]; ok {
-			prunedLog = append(prunedLog, DebugEntry{Source: "optimization", Line: e, Reason: "excluded by exact whitelist"})
-			continue
-		}
-		covered := false
-		for _, ww := range wildWhites {
-			if isCoveredByWildcard(e, ww) {
-				covered = true
-				prunedLog = append(prunedLog, DebugEntry{Source: "optimization", Line: e, Reason: "excluded by wildcard whitelist: " + ww})
-				break
-			}
-		}
-		if covered {
-			continue
-		}
-		blackList = append(blackList, fmt.Sprintf("||%s^", e))
-	}
+	blackList = append(blackList, wildcardsBlack...)
+	blackList = append(blackList, optimizedExactsBlack...)
 	sort.Strings(blackList)
-	whiteList := make([]string, 0, len(whiteRaw))
-	for w := range whiteRaw {
-		whiteList = append(whiteList, w)
+	for i := range blackList {
+		blackList[i] = fmt.Sprintf("||%s^", blackList[i])
 	}
-	sort.Strings(whiteList)
-	finalList := make([]string, 0, len(blackList)+len(whiteList))
-	finalList = append(finalList, blackList...)
-	for _, w := range whiteList {
-		finalList = append(finalList, fmt.Sprintf("@@||%s^", w))
-	}
-	// 合并 prunedLog 到 debugLog
+	// Append optimization logs to main debug for comprehensive tracking.
 	debugLog = append(debugLog, prunedLog...)
-	// 5. 写入 AdGuard 文件
-	writeResultFile(OutputFile, finalList)
-	// 6. 新增: 写入 AdAway hosts 文件 (仅精确黑域名)
+	// Write AdGuard-compatible file for broad ad-blocker support.
+	writeResultFile(OutputFile, blackList)
+	// Generate hosts file only with valid exact domains for DNS-level blocking.
 	hostsLines := make([]string, 0, len(optimizedExactsBlack))
 	for _, e := range optimizedExactsBlack {
-		if _, ok := whiteRaw[e]; !ok {
-			covered := false
-			for _, ww := range wildWhites {
-				if isCoveredByWildcard(e, ww) {
-					covered = true
-					break
-				}
-			}
-			if covered {
-				continue
-			}
-			if isValidDNSDomain(e) {
-				hostsLines = append(hostsLines, fmt.Sprintf("%s %s", BlockingIP, e))
-			}
+		if isValidDNSDomain(e) {
+			hostsLines = append(hostsLines, fmt.Sprintf("%s %s", BlockingIP, e))
 		}
 	}
 	sort.Strings(hostsLines)
 	writeHostsFile(HostsOutputFile, hostsLines)
-	// 7. 写入 Debug 文件
+	// Save debug logs to facilitate review of discarded rules.
 	writeDebugFile(DebugFile, debugLog)
 	fmt.Println("---------------------------------------------------------")
 	fmt.Printf(">>> 全部完成!\n")
-	fmt.Printf(">>> 最终 AdGuard 规则数: %d\n", len(finalList))
+	fmt.Printf(">>> 最终 AdGuard 规则数: %d\n", len(blackList))
 	fmt.Printf(">>> 最终 AdAway hosts 条目数: %d\n", len(hostsLines))
 	fmt.Printf(">>> 总耗时: %v\n", time.Since(start))
 	fmt.Println("---------------------------------------------------------")
@@ -204,7 +153,7 @@ func main() {
 // -----------------------------------------------------------------------------
 // 压缩算法 V2: 通配符剪枝
 // -----------------------------------------------------------------------------
-// wildcardPruning: 剔除被通配符规则完全覆盖的纯域名规则。
+// Prunes exact domains to avoid duplication where wildcards provide equivalent coverage, reducing list bloat.
 func wildcardPruning(exacts []string, wildcards []string, prunedLog *[]DebugEntry) ([]string, int) {
 	if len(wildcards) == 0 {
 		return exacts, 0
@@ -220,10 +169,10 @@ func wildcardPruning(exacts []string, wildcards []string, prunedLog *[]DebugEntr
 		}
 		for _, pattern := range wildcards {
 			if isCoveredByWildcard(exact, pattern) {
-				delete(exactMap, exact) // 移除冗余的 exact 域名
+				delete(exactMap, exact)
 				removedCount++
 				*prunedLog = append(*prunedLog, DebugEntry{Source: "optimization", Line: exact, Reason: "pruned by wildcard black: " + pattern})
-				break // 找到一个匹配的通配符即可
+				break
 			}
 		}
 	}
@@ -234,31 +183,27 @@ func wildcardPruning(exacts []string, wildcards []string, prunedLog *[]DebugEntr
 	return remainingExacts, removedCount
 }
 
-// isCoveredByWildcard 检查一个纯域名是否能被通配符模式覆盖。
+// Checks coverage to ensure pruning doesn't weaken blocking effectiveness.
 func isCoveredByWildcard(exact string, pattern string) bool {
-	// 1. 拆分模式：例如 "*-analytics*.huami.com" -> ["", "-analytics", ".huami.com"]
 	parts := strings.Split(pattern, "*")
-	idx := 0 // 记录在 exact 字符串中匹配到的位置
-	// 2. 检查前缀 (parts[0])
+	idx := 0
 	if parts[0] != "" {
 		if !strings.HasPrefix(exact, parts[0]) {
 			return false
 		}
 		idx = len(parts[0])
 	}
-	// 3. 检查中间部分 (parts[1] 到 parts[len-2]) 必须按顺序出现
 	for i := 1; i < len(parts)-1; i++ {
 		part := parts[i]
 		if part == "" {
-			continue // 处理 ** 或 *.* 这种连续通配符
+			continue
 		}
 		foundIdx := strings.Index(exact[idx:], part)
 		if foundIdx == -1 {
-			return false // 中间部分未找到
+			return false
 		}
 		idx += foundIdx + len(part)
 	}
-	// 4. 检查后缀 (parts[len-1])
 	lastPart := parts[len(parts)-1]
 	if lastPart != "" {
 		if !strings.HasSuffix(exact, lastPart) {
@@ -270,7 +215,7 @@ func isCoveredByWildcard(exact string, pattern string) bool {
 	return true
 }
 
-// removeSubdomains: 核心压缩算法，通过反转排序法去除冗余子域名。
+// Removes subdomains via reversed sorting to efficiently detect and eliminate redundancies in hierarchical domains.
 func removeSubdomains(domains []string, prunedLog *[]DebugEntry) ([]string, int) {
 	type item struct {
 		orig string
@@ -278,7 +223,6 @@ func removeSubdomains(domains []string, prunedLog *[]DebugEntry) ([]string, int)
 	}
 	items := make([]item, 0, len(domains))
 	for _, d := range domains {
-		// 翻转域名: example.com -> com.example
 		parts := strings.Split(d, ".")
 		for i, j := 0, len(parts)-1; i < j; i, j = i+1, j-1 {
 			parts[i], parts[j] = parts[j], parts[i]
@@ -297,7 +241,6 @@ func removeSubdomains(domains []string, prunedLog *[]DebugEntry) ([]string, int)
 	result = append(result, prev.orig)
 	for i := 1; i < len(items); i++ {
 		curr := items[i]
-		// 检查 curr 是否是 prev 的子域名
 		if strings.HasPrefix(curr.rev, prev.rev+".") {
 			removedCount++
 			*prunedLog = append(*prunedLog, DebugEntry{Source: "optimization", Line: curr.orig, Reason: "subdomain pruned by parent: " + prev.orig})
@@ -312,7 +255,7 @@ func removeSubdomains(domains []string, prunedLog *[]DebugEntry) ([]string, int)
 // -----------------------------------------------------------------------------
 // 核心逻辑 (清洗与校验)
 // -----------------------------------------------------------------------------
-func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack []string, validWhite []string, invalid []DebugEntry) {
+func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack []string, invalid []DebugEntry) {
 	client := &http.Client{Timeout: 20 * time.Second}
 	req, _ := http.NewRequest("GET", url, nil)
 	req.Header.Set("User-Agent", UserAgent)
@@ -336,7 +279,6 @@ func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack 
 			continue
 		}
 		clean, isWhite, reason := normalizeLine(line)
-		// 截取文件名
 		l := path.Base(url)
 		if clean == "" {
 			if len(line) > 5 {
@@ -344,28 +286,27 @@ func downloadAndProcess(url string, invalidSet map[string]struct{}) (validBlack 
 			}
 			continue
 		}
-		// 检查: 是否在无效域名黑名单中
+		// Exclude invalid domains to protect against known malicious or irrelevant entries.
 		if _, exists := invalidSet[clean]; exists {
 			invalid = append(invalid, DebugEntry{Source: l, Line: clean, Reason: "invalid_domains"})
 			continue
 		}
 		if isWhite {
-			validWhite = append(validWhite, clean)
-		} else {
-			validBlack = append(validBlack, clean)
+			invalid = append(invalid, DebugEntry{Source: l, Line: clean, Reason: "discarded whitelist (potential malicious upstream)"})
+			continue
 		}
+		validBlack = append(validBlack, clean)
 	}
 	return
 }
 
+// Normalizes lines to standardize rule format, ensuring consistency across diverse upstream sources.
 func normalizeLine(line string) (string, bool, string) {
 	lower := strings.ToLower(line)
 	isWhite := false
-	// 1. 修饰符截断
 	if before, _, found := strings.Cut(lower, "$"); found {
 		lower = strings.TrimSpace(before)
 	}
-	// 2. 协议及IP剥离
 	for {
 		var found bool
 		if lower, found = strings.CutPrefix(lower, "http://"); found {
@@ -386,7 +327,6 @@ func normalizeLine(line string) (string, bool, string) {
 		break
 	}
 	lower = strings.TrimSpace(lower)
-	// 3. AdGuard 语法清理
 	if val, found := strings.CutPrefix(lower, "@@||"); found {
 		isWhite = true
 		lower = val
@@ -396,16 +336,15 @@ func normalizeLine(line string) (string, bool, string) {
 	if val, found := strings.CutSuffix(lower, "^"); found {
 		lower = val
 	}
-	// 4. Hosts 尾部清理
 	fields := strings.Fields(lower)
 	if len(fields) > 0 {
 		lower = fields[0]
 	}
-	// 5. 域名校验
 	clean, reason := validateDomain(lower)
 	return clean, isWhite, reason
 }
 
+// Validates domains to enforce DNS compliance and prevent invalid or harmful rules.
 func validateDomain(domain string) (string, string) {
 	domain = strings.Trim(domain, "./")
 	if domain == "" {
@@ -414,18 +353,15 @@ func validateDomain(domain string) (string, string) {
 	if domain == "localhost" || domain == "local" {
 		return "", "Localhost"
 	}
-	// 压缩逻辑：防止顶级域名 (TLD) 被误加入
 	if !strings.Contains(domain, ".") {
 		return "", "TLD/Single Word"
 	}
 	if !validRulePattern.MatchString(domain) {
 		return "", "Invalid Chars"
 	}
-	// 通配符不进行 IDNA
 	if strings.Contains(domain, "*") {
 		return domain, ""
 	}
-	// Punycode 转码
 	puny, err := idna.ToASCII(domain)
 	if err != nil {
 		return "", "Punycode Error"
@@ -433,7 +369,7 @@ func validateDomain(domain string) (string, string) {
 	return puny, ""
 }
 
-// isValidDNSDomain 检查域名是否符合 DNS 标准 (用于 hosts 文件)
+// Ensures domain validity for hosts files to comply with DNS resolution standards.
 func isValidDNSDomain(domain string) bool {
 	if strings.HasPrefix(domain, ".") || strings.HasSuffix(domain, ".") {
 		return false
@@ -458,6 +394,7 @@ func isValidDNSDomain(domain string) bool {
 // -----------------------------------------------------------------------------
 // 文件 IO 及辅助工具
 // -----------------------------------------------------------------------------
+// Loads invalid domains to preemptively filter out unwanted entries.
 func loadInvalidDomains(path string) map[string]struct{} {
 	set := make(map[string]struct{})
 	f, err := os.Open(path)
@@ -483,6 +420,7 @@ func loadInvalidDomains(path string) map[string]struct{} {
 	return set
 }
 
+// Monitors memory to detect and mitigate potential leaks during processing.
 func printMemUsage() {
 	var m runtime.MemStats
 	runtime.ReadMemStats(&m)
@@ -490,6 +428,7 @@ func printMemUsage() {
 		m.Alloc/1024/1024, m.TotalAlloc/1024/1024, m.Sys/1024/1024, m.NumGC)
 }
 
+// Displays header for user orientation at program start.
 func printHeader() {
 	fmt.Println(`
 =========================================================
@@ -497,6 +436,7 @@ func printHeader() {
 =========================================================`)
 }
 
+// Fetches upstream list to dynamically source rules without hardcoding.
 func fetchUpstreamList(url string) []string {
 	var list []string
 	fmt.Printf(">>> [Init] 获取上游配置: %s\n", url)
@@ -517,6 +457,7 @@ func fetchUpstreamList(url string) []string {
 	return list
 }
 
+// Writes results with metadata for traceability in ad-blocker usage.
 func writeResultFile(filename string, lines []string) {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -535,7 +476,7 @@ func writeResultFile(filename string, lines []string) {
 	fmt.Printf(">>> [File] AdGuard 结果已保存至: %s\n", filename)
 }
 
-// 新增: 写入 AdAway hosts 文件
+// Writes hosts file for alternative blocking methods.
 func writeHostsFile(filename string, lines []string) {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -554,6 +495,7 @@ func writeHostsFile(filename string, lines []string) {
 	fmt.Printf(">>> [File] AdAway hosts 已保存至: %s\n", filename)
 }
 
+// Sorts and writes debug logs for organized review.
 func writeDebugFile(filename string, logs []DebugEntry) {
 	if len(logs) == 0 {
 		return
@@ -580,6 +522,7 @@ func writeDebugFile(filename string, logs []DebugEntry) {
 	fmt.Printf(">>> [File] Debug日志已保存至: %s\n", filename)
 }
 
+// Trims long strings to keep logs readable.
 func trimLong(s string) string {
 	if len(s) > 80 {
 		return s[:77] + "..."
