@@ -23,14 +23,14 @@ fi
 
 # --- 写入 service ---
 echo "==> 生成 service: $SERVICE_FILE"
-sudo tee "$SERVICE_FILE" >/dev/null <<'EOF'
+sudo tee "$SERVICE_FILE" >/dev/null <<EOF
 [Unit]
 Description=Run hosts_repo app once
 
 [Service]
 Type=oneshot
-ExecStart=/home/zws/hosts_repo/app
-WorkingDirectory=/home/zws/hosts_repo
+ExecStart=$APP_PATH
+WorkingDirectory=$WORKDIR
 StandardOutput=journal
 StandardError=journal
 EOF
