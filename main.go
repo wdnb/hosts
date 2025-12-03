@@ -242,18 +242,19 @@ func checkDomainsForInvalid(rules []string, dnsServers []string, limiters map[st
 // 返回 false: 域名解析成功，或因网络/服务器问题无法确定（保守保留）。
 func isDomainDead(domain string, servers []string, limiters map[string]*rate.Limiter, m *dns.Msg) bool {
 	fqdn := dns.Fqdn(domain)
-	maxRetries := 3
+	maxRetries := len(servers) // Increase to try more servers for better consensus; cap if needed
+	if maxRetries > 5 {
+		maxRetries = 5 // Limit to avoid overuse, adjust as needed
+	}
 
-	// 为什么要 Shuffle？
-	// 防止“热点效应”。如果所有 Worker 都按顺序请求 Server A，Server A 的限流桶会瞬间耗尽，
-	// 导致大量协程阻塞等待，而 Server B 却闲置。随机化保证了负载在所有可用 DNS 间均匀分布。
-	// 使用 Perm 获取随机索引比每次 copy slice 性能更好。
 	perm := rand.Perm(len(servers))
+	successCount := 0
+	nxdomainCount := 0
+	validResponses := 0
 
 	for i := 0; i < maxRetries && i < len(servers); i++ {
 		server := servers[perm[i]]
 
-		// 流量控制：严格遵守该 DNS 服务器的速率限制
 		if limiter, ok := limiters[server]; ok {
 			if err := limiter.Wait(context.Background()); err != nil {
 				continue
@@ -263,45 +264,34 @@ func isDomainDead(domain string, servers []string, limiters map[string]*rate.Lim
 		m.SetQuestion(fqdn, dns.TypeA)
 		r, _, err := dnsClient.Exchange(m, server)
 
-		// 1. 网络层错误处理
 		if err != nil {
-			// 超时或连接重置。这不代表域名不存在，只能说明当前网络路径不通。
-			// 策略：换一个服务器重试。
 			continue
 		}
 
-		// 2. 协议层响应处理
 		if r == nil {
 			continue
 		}
 
+		validResponses++
 		switch r.Rcode {
 		case dns.RcodeSuccess:
-			// RcodeSuccess 意味着域名记录存在（即使 Answer 为空，也代表该 Zone 存在）。
-			// 策略：判定为存活，无需再试。
-			return false
-
+			successCount++
+			// Optional: Check if Answer is non-empty to avoid false lives from hijacks
+			if len(r.Answer) > 0 {
+				return false // Early exit if we have clear evidence of existence
+			}
 		case dns.RcodeNameError:
-			// NXDOMAIN: 权威服务器明确告知域名不存在。
-			// 策略：这是唯一能判死刑的依据。立即返回 true。
-			return true
-
-		case dns.RcodeServerFailure, dns.RcodeRefused:
-			// SERVFAIL/REFUSED: 目标 DNS 服务器本身出问题或拒绝了我们。
-			// 绝对不能因此认为域名无效。
-			// 策略：必须重试下一个服务器。
-			continue
-
+			nxdomainCount++
 		default:
-			// 其他罕见错误（如 FormatError），保守起见，视为重试或存活。
-			continue
+			// Ignore other codes
 		}
 	}
 
-	// 循环结束仍未返回，说明所有尝试都失败了（全超时或全拒绝）。
-	// 此时我们要问：能确定它死吗？不能。
-	// 策略：疑罪从无，保留域名。
-	return false
+	// Consensus logic: Dead only if no success and some NXDOMAIN
+	if successCount == 0 && nxdomainCount > 0 && validResponses > 0 {
+		return true
+	}
+	return false // Default to live if uncertain or mixed
 }
 
 // ---------------------- 辅助功能 (下载/解析/IO) ----------------------
