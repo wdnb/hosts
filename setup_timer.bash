@@ -44,7 +44,7 @@ Description=Daily run for hosts_repo app (UTC schedule)
 
 [Timer]
 OnCalendar=*-*-* 21:00:00
-Timezone=UTC
+TimeZone=UTC
 Persistent=true
 
 [Install]
