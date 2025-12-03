@@ -36,7 +36,7 @@ jobs:
         run: |
           # 下载到 Action 运行时：./invalid_domains.txt
           scp -o StrictHostKeyChecking=no \
-            ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/home/ ${{ secrets.VPS_USERNAME }}/hosts_repo/invalid_domains.txt \
+            ${{ secrets.VPS_USERNAME }}@${{ secrets.VPS_HOST }}:/home/${{ secrets.VPS_USERNAME }}/hosts_repo/invalid_domains.txt \
             ./invalid_domains.txt
       # --- ⬆️ 关键新增步骤：下载 VPS 文件 ⬆️ ---
 
