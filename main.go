@@ -21,8 +21,8 @@ import (
 // -----------------------------------------------------------------------------
 // Constants define fixed values used throughout the program to ensure consistency and ease of maintenance.
 const (
-	OutputFile         = "adblock_lite.txt"
-	HostsOutputFile    = "adaway_hosts.txt" // Supports AdAway format for compatibility with hosts-based blockers.
+	OutputFile         = "adguard.txt"
+	HostsOutputFile    = "adaway.txt" // Supports AdAway format for compatibility with hosts-based blockers.
 	DebugFile          = "adblock_debug.txt"
 	InvalidDomainsFile = "invalid_domains.txt" // Local file listing domains to exclude for security reasons.
 	UserAgent          = "AdGuard-Compiler/4.0 (Go 1.23; Advanced Pruning)"

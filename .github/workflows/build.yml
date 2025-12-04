@@ -47,7 +47,7 @@ jobs:
           # 确保您的 Go 程序能够读取当前目录下的 invalid_domains.txt 文件
           go build -o adblock-aggregator main.go
           ./adblock-aggregator
-          # 运行后将生成 adblock_lite.txt 等文件
+          # 运行后将生成 adguard.txt 等文件
 
       # 4. 提交更改回仓库
       - name: 📤 Commit and Push new list
@@ -56,7 +56,7 @@ jobs:
           git config --global user.email '41898282+github-actions[bot]@users.noreply.github.com'
           
           # 注意：这里需要确保您的 Go 程序不再需要的旧文件名
-          git add -f adblock_lite.txt adblock_debug.txt adaway_hosts.txt
+          git add -f adguard.txt adblock_debug.txt adaway.txt
           
           if ! git diff --cached --exit-code --quiet; then
               echo "发现 adblock 列表存在更改，开始提交..."
