@@ -150,7 +150,6 @@ func (sc *StatsCollector) SetTotalRaw(total int) {
 func (sc *StatsCollector) WriteToDebugFile(filename string) {
 	sc.mu.Lock()
 	defer sc.mu.Unlock()
-
 	f, err := os.Create(filename)
 	if err != nil {
 		fmt.Printf("!!! 写入 %s 失败: %v\n", filename, err)
@@ -160,7 +159,6 @@ func (sc *StatsCollector) WriteToDebugFile(filename string) {
 	w := bufio.NewWriter(f)
 	fmt.Fprintf(w, "# Debug Log\n# Updated: %s\n", time.Now().Format(time.RFC3339))
 	fmt.Fprintf(w, "# Total Raw Rules: %d | Total Discarded (non-opt): %d | Total Final: %d\n\n", sc.totalRaw, sc.totalDiscarded, sc.totalFinal)
-
 	// Discarded by Reason (global)
 	fmt.Fprintf(w, "# Discarded Statistics by Reason (excluding optimizations) - Total: %d\n", sc.totalDiscarded)
 	var reasonList []struct {
@@ -178,7 +176,6 @@ func (sc *StatsCollector) WriteToDebugFile(filename string) {
 		fmt.Fprintf(w, "# %s: %d\n", rl.reason, rl.cnt)
 	}
 	fmt.Fprintln(w)
-
 	// Discarded by Source and Reason (detailed per-source breakdown)
 	fmt.Fprintln(w, "# Discarded Statistics by Upstream Source and Reason (excluding optimizations)")
 	var sourceList []string
@@ -205,7 +202,6 @@ func (sc *StatsCollector) WriteToDebugFile(filename string) {
 		}
 	}
 	fmt.Fprintln(w)
-
 	// Source Quality Metrics (to identify garbage upstreams)
 	fmt.Fprintln(w, "# Source Quality Metrics (to identify low-quality/garbage upstreams)")
 	var qualityList []struct {
@@ -256,7 +252,6 @@ func (sc *StatsCollector) WriteToDebugFile(filename string) {
 			ql.src, ql.total, ql.accepted, ql.discarded, ql.discardPct, ql.contribution, ql.contributionPct, ql.unique, ql.uniquePct)
 	}
 	fmt.Fprintln(w)
-
 	// Optimization Pruned Logs
 	fmt.Fprintln(w, "# Optimization Pruned Entries")
 	sort.Slice(sc.optimizationPruned, func(i, j int) bool {
@@ -269,7 +264,6 @@ func (sc *StatsCollector) WriteToDebugFile(filename string) {
 		fmt.Fprintf(w, "[optimization] %s | Reason: %s\n", l.Line, l.Reason)
 	}
 	fmt.Fprintln(w)
-
 	// Detailed Discard Logs (non-optimization)
 	fmt.Fprintln(w, "# Detailed Discard Logs (excluding optimizations)")
 	var discardLogs []DebugEntry
@@ -377,32 +371,53 @@ func main() {
 	stats.AddOptimizationPruned(prunedLog)
 	// Generate output files for use in AdGuard and AdAway.
 	fmt.Println(">>> [Phase 3] 生成文件...")
-	blackList := make([]string, 0, len(wildcardsBlack)+len(optimizedExactsBlack))
-	blackList = append(blackList, wildcardsBlack...)
-	blackList = append(blackList, optimizedExactsBlack...)
+	// Separate logic for AdGuard export: Supports wildcards like "*.black" for blocking all domains with .black TLD.
+	adguardRules := generateAdGuardRules(wildcardsBlack, optimizedExactsBlack)
+	writeResultFile(OutputFile, adguardRules)
+	// Separate logic for AdAway export: Does not support wildcards, so only exact domains are used.
+	adawayHosts := generateAdAwayHosts(optimizedExactsBlack)
+	writeHostsFile(HostsOutputFile, adawayHosts)
+	// Save debug logs via stats collector
+	stats.WriteToDebugFile(DebugFile)
+	fmt.Println("---------------------------------------------------------")
+	fmt.Printf(">>> 全部完成!\n")
+	fmt.Printf(">>> 最终 AdGuard 规则数: %d\n", len(adguardRules))
+	fmt.Printf(">>> 最终 AdAway hosts 条目数: %d\n", len(adawayHosts))
+	fmt.Printf(">>> 总耗时: %v\n", time.Since(start))
+	fmt.Println("---------------------------------------------------------")
+}
+
+// -----------------------------------------------------------------------------
+// Export Logic Separation: AdGuard Rules Generation
+// -----------------------------------------------------------------------------
+// generateAdGuardRules generates rules in AdGuard Home format, which supports wildcards (e.g., "*.black" to block all .black TLD domains).
+// This function abstracts the AdGuard-specific formatting, separating it from AdAway logic for better maintainability.
+func generateAdGuardRules(wildcards, exacts []string) []string {
+	blackList := make([]string, 0, len(wildcards)+len(exacts))
+	blackList = append(blackList, wildcards...)
+	blackList = append(blackList, exacts...)
 	sort.Strings(blackList)
 	for i := range blackList {
 		blackList[i] = fmt.Sprintf("||%s^", blackList[i])
 	}
-	// Write AdGuard-compatible file for broad ad-blocker support.
-	writeResultFile(OutputFile, blackList)
-	// Generate hosts file only with valid exact domains for DNS-level blocking.
-	hostsLines := make([]string, 0, len(optimizedExactsBlack))
-	for _, e := range optimizedExactsBlack {
+	return blackList
+}
+
+// -----------------------------------------------------------------------------
+// Export Logic Separation: AdAway Hosts Generation
+// -----------------------------------------------------------------------------
+// generateAdAwayHosts generates hosts entries for AdAway, which does not support wildcards.
+// Only valid exact domains are included to comply with hosts file limitations.
+// This function abstracts the AdAway-specific formatting, separating it from AdGuard logic for better maintainability.
+func generateAdAwayHosts(exacts []string) []string {
+	hostsLines := make([]string, 0, len(exacts))
+	for _, e := range exacts {
 		if isValidDNSDomain(e) {
 			hostsLines = append(hostsLines, fmt.Sprintf("%s %s", BlockingIP, e))
 		}
 	}
 	sort.Strings(hostsLines)
-	writeHostsFile(HostsOutputFile, hostsLines)
-	// Save debug logs via stats collector
-	stats.WriteToDebugFile(DebugFile)
-	fmt.Println("---------------------------------------------------------")
-	fmt.Printf(">>> 全部完成!\n")
-	fmt.Printf(">>> 最终 AdGuard 规则数: %d\n", len(blackList))
-	fmt.Printf(">>> 最终 AdAway hosts 条目数: %d\n", len(hostsLines))
-	fmt.Printf(">>> 总耗时: %v\n", time.Since(start))
-	fmt.Println("---------------------------------------------------------")
+	return hostsLines
 }
 
 // -----------------------------------------------------------------------------
@@ -602,6 +617,7 @@ func normalizeLine(line string) (string, bool, string) {
 }
 
 // Validates domains to enforce DNS compliance and prevent invalid or harmful rules.
+// Supports wildcards like "*.black" for AdGuard compatibility.
 func validateDomain(domain string) (string, string) {
 	domain = strings.Trim(domain, "./")
 	if domain == "" {
@@ -715,6 +731,7 @@ func fetchUpstreamList(url string) []string {
 }
 
 // Writes results with metadata for traceability in ad-blocker usage.
+// This function is used for AdGuard output.
 func writeResultFile(filename string, lines []string) {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -734,6 +751,7 @@ func writeResultFile(filename string, lines []string) {
 }
 
 // Writes hosts file for alternative blocking methods.
+// This function is used for AdAway output.
 func writeHostsFile(filename string, lines []string) {
 	f, err := os.Create(filename)
 	if err != nil {
