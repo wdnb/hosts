@@ -358,24 +358,24 @@ func main() {
 	optStart := time.Now()
 	// Track pruned entries for debugging optimization effectiveness.
 	prunedLog := make([]DebugEntry, 0)
-	// Prune exact domains covered by wildcards to minimize list size without losing coverage.
+	// Prune exact domains covered by wildcards to minimize list size without losing coverage (AdGuard only).
 	remainingExactsBlack, wildcardPrunedCount := wildcardPruning(exactsBlack, wildcardsBlack, &prunedLog)
-	// Remove subdomains covered by parents to further compress the list efficiently.
+	// Remove subdomains covered by parents to further compress the list efficiently (AdGuard only).
 	optimizedExactsBlack, subdomainPrunedCount := removeSubdomains(remainingExactsBlack, &prunedLog)
 	totalPruned := wildcardPrunedCount + subdomainPrunedCount
 	fmt.Printf(" -> 优化算法总耗时: %v\n", time.Since(optStart))
 	fmt.Printf(" -> 1. 通配符剪枝剔除: %d 条\n", wildcardPrunedCount)
 	fmt.Printf(" -> 2. 子域名剔除: %d 条\n", subdomainPrunedCount)
-	fmt.Printf(" -> 总优化剔除: %d 条 (最终黑名单规则数: %d)\n", totalPruned, len(wildcardsBlack)+len(optimizedExactsBlack))
+	fmt.Printf(" -> 总优化剔除: %d 条 (最终 AdGuard 黑名单规则数: %d)\n", totalPruned, len(wildcardsBlack)+len(optimizedExactsBlack))
 	// Report optimization pruned to stats
 	stats.AddOptimizationPruned(prunedLog)
 	// Generate output files for use in AdGuard and AdAway.
 	fmt.Println(">>> [Phase 3] 生成文件...")
-	// Separate logic for AdGuard export: Supports wildcards like "*.black" for blocking all domains with .black TLD.
+	// AdGuard: Use optimized list with wildcards.
 	adguardRules := generateAdGuardRules(wildcardsBlack, optimizedExactsBlack)
 	writeResultFile(OutputFile, adguardRules)
-	// Separate logic for AdAway export: Does not support wildcards, so only exact domains are used.
-	adawayHosts := generateAdAwayHosts(optimizedExactsBlack)
+	// AdAway: Use all original exact domains (no pruning, as hosts files don't support wildcards or subdomain coverage).
+	adawayHosts := generateAdAwayHosts(exactsBlack)
 	writeHostsFile(HostsOutputFile, adawayHosts)
 	// Save debug logs via stats collector
 	stats.WriteToDebugFile(DebugFile)
@@ -406,8 +406,8 @@ func generateAdGuardRules(wildcards, exacts []string) []string {
 // -----------------------------------------------------------------------------
 // Export Logic Separation: AdAway Hosts Generation
 // -----------------------------------------------------------------------------
-// generateAdAwayHosts generates hosts entries for AdAway, which does not support wildcards.
-// Only valid exact domains are included to comply with hosts file limitations.
+// generateAdAwayHosts generates hosts entries for AdAway, which does not support wildcards or parent-domain subdomain blocking.
+// Only valid exact domains are included to comply with hosts file limitations. No pruning is applied to maximize coverage.
 // This function abstracts the AdAway-specific formatting, separating it from AdGuard logic for better maintainability.
 func generateAdAwayHosts(exacts []string) []string {
 	hostsLines := make([]string, 0, len(exacts))
