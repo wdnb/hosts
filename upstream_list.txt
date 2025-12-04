@@ -1,3 +1,7 @@
+#217heidai
+https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockdns.txt
+#CHN: anti-AD
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt
 #HaGeZi's Ultimate Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_49.txt
 #HaGeZi's Gambling Blocklist
@@ -10,63 +14,102 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_54.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_55.txt
 #HaGeZi's The World's Most Abused TLDs
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_56.txt
-#Dandelion Sprout's Anti Push Notifications
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt
-#Dandelion Sprout's Game Console Adblock List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt
-#Dandelion Sprout's Anti-Malware List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt
-#Perflyst and Dandelion Sprout's Smart-TV Blocklist
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt
-#217heidai
-https://raw.githubusercontent.com/217heidai/adblockfilters/main/rules/adblockdns.txt
-#AdAway Default Blocklist
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
-#1Hosts (Lite)
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt
+#ShadowWhisperer Tracking List
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_69.txt
+#ShadowWhisperer's Malware List
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt
+#ShadowWhisperer's Dating List
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_57.txt
 #AdGuard DNS Popup Hosts filter
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt
+#AdGuard DNS filter
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
 #OISD Blocklist Big
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt
 #Peter Lowe's Blocklist
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt
-#ShadowWhisperer Tracking List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_69.txt
 #uBlock₀ filters – Badware risks
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt
-#Stalkerware Indicators List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
-#ShadowWhisperer's Malware List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_42.txt
 #Scam Blocklist by DurableNapkin
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_10.txt
-#NoCoin Filter List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt
-
-#ShadowWhisperer's Dating List
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_57.txt
-#CHN: anti-AD
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_21.txt
-
 #Phishing URL Blocklist (PhishTank and OpenPhish)
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_30.txt
-#AdGuard DNS filter
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
-
+#AdAway Default Blocklist
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
+#1Hosts (Lite)
+https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt
+# Frogeye First-party Trackers（第一方追踪器专用，OISD 和 HaGeZi 覆盖较弱）
+https://hostfiles.frogeye.fr/firstparty-trackers-hosts.txt
+# 第三方跟踪器
+https://hostfiles.frogeye.fr/multiparty-only-trackers-hosts.txt
+# NoTrack Malware Blocklist（quidsup，专注恶意域名，更新频繁，与 OISD/HaGeZi 重叠少）
+https://gitlab.com/quidsup/notrack-blocklists/raw/master/notrack-malware.txt
 
 ##########################不活跃上游##########################
-
 #Phishing Army 
 # Source: filter_18.txt
 #   invalid_domains: 66490
 # filter_18.txt: Total=159870 | Accepted=93370 | Discarded=66490 (41.59%) | Contribution=93370 (8.32% of final) | Unique=26987 (28.90% of contrib)
 #https://adguardteam.github.io/HostlistsRegistry/assets/filter_18.txt
+# Phishing Army Extended Blocklist（=filter_18.txt 钓鱼站点，更新极快，比 PhishTank+OpenPhish 更激进）
+# Source: phishing_army_blocklist_extended.txt
+#   invalid_domains: 39896
+# phishing_army_blocklist_extended.txt: Total=159861 | Accepted=119952 | Discarded=39896 (24.96%) | Contribution=119952 (7.63% of final) | Unique=37643 (31.38% of contrib)
+#https://phishing.army/download/phishing_army_blocklist_extended.txt
 
 #Malicious URL Blocklist (URLHaus)
 # Source: filter_11.txt
 #   invalid_domains: 8836
 # filter_11.txt: Total=13291 | Accepted=4446 | Discarded=8836 (66.48%) | Contribution=4446 (0.40% of final) | Unique=1600 (35.99% of contrib)
 #https://adguardteam.github.io/HostlistsRegistry/assets/filter_11.txt
+# URLHaus实时恶意URL
+# Source: urlhaus-filter-agh-online.txt
+#   invalid_domains: 2484
+# urlhaus-filter-agh-online.txt: Total=5722 | Accepted=3226 | Discarded=2484 (43.41%) | Contribution=1613 (0.10% of final) | Unique=975 (60.45% of contrib)
+#https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-agh-online.txt 
+# URLHaus Online Malicious URL Blocklist（实时恶意 URL，补充 HaGeZi Threat 不覆盖的部分，每小时更新）
+# Source: urlhaus-filter-agh-online.txt
+#   invalid_domains: 1242
+# urlhaus-filter-agh-online.txt: Total=2861 | Accepted=1613 | Discarded=1242 (43.41%) | Contribution=1613 (0.14% of final) | Unique=975 (60.45% of contrib)
+#https://malware-filter.gitlab.io/malware-filter/urlhaus-filter-agh-online.txt
+
+# DeveloperDan广告/跟踪扩展
+# Source: ads-and-tracking-extended.txt
+#   invalid_domains: 79682
+# ads-and-tracking-extended.txt: Total=858618 | Accepted=778890 | Discarded=79682 (9.28%) | Contribution=389445 (24.84% of final) | Unique=374081 (96.05% of contrib)
+#https://www.github.developerdan.com/hosts/lists/ads-and-tracking-extended.txt
+# DeveloperDan ads-and-tracking-extended（超激进广告+追踪，比 OISD Big 更狠，适合极致用户）(这是第二次单独跑的数据)
+# Source: ads-and-tracking-extended.txt
+#   invalid_domains: 39841
+# ads-and-tracking-extended.txt: Total=429309 | Accepted=389445 | Discarded=39841 (9.28%) | Contribution=389445 (25.48% of final) | Unique=374088 (96.06% of contrib)
+#https://www.github.developerdan.com/hosts/lists/ads-and-tracking-extended.txt
+
+#FadeMind Spam Hosts
+# Source: hosts.txt
+#   invalid_domains: 83
+# hosts.txt: Total=324 | Accepted=230 | Discarded=83 (25.62%) | Contribution=230 (0.01% of final) | Unique=0 (0.00% of contrib)
+#https://raw.githubusercontent.com/FadeMind/hosts.extras/master/add.Spam/hosts
+
+# StevenBlack Unified Hosts (基础 hosts，覆盖极广，持续更新，比 KAD/SomeoneWhoCares/w3kbl 更全更活跃)
+# Source: hosts
+#   invalid_domains: 17744
+#   TLD/Single Word: 17
+#   Localhost: 3
+# hosts: Total=103168 | Accepted=78351 | Discarded=17764 (17.22%) | Contribution=68836 (4.50% of final) | Unique=29963 (43.53% of contrib)
+#https://raw.githubusercontent.com/StevenBlack/hosts/master/hosts
+
+#SomeoneWhoCares (Dan Pollock)
+# Source: hosts
+#   invalid_domains: 2255
+#   TLD/Single Word: 9
+# hosts: Total=12136 | Accepted=9562 | Discarded=2264 (18.66%) | Contribution=9560 (0.85% of final) | Unique=4335 (45.35% of contrib)
+#https://someonewhocares.org/hosts/zero/hosts
+
+#Matomo Referrer Spam
+# Source: spammers.txt
+#   invalid_domains: 553
+# spammers.txt: Total=2322 | Accepted=1769 | Discarded=553 (23.82%) | Contribution=1769 (0.12% of final) | Unique=397 (22.44% of contrib)
+#https://raw.githubusercontent.com/matomo-org/referrer-spam-blacklist/master/spammers.txt
 
 #The Big List of Hacked Malware Web Sites
 # Source: filter_9.txt
@@ -74,4 +117,62 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
 # filter_9.txt: Total=13477 | Accepted=7284 | Discarded=6184 (45.89%) | Contribution=7284 (0.65% of final) | Unique=6986 (95.91% of contrib)
 #https://adguardteam.github.io/HostlistsRegistry/assets/filter_9.txt
 
+# Blocklist Project - Ransomware
+# Source: ransomware.txt
+#   invalid_domains: 1152
+# ransomware.txt: Total=1919 | Accepted=752 | Discarded=1152 (60.03%) | Contribution=752 (0.05% of final) | Unique=742 (98.67% of contrib)
+#https://blocklistproject.github.io/Lists/ransomware.txt
+
+#KADhosts(波兰语规则)
+# Source: KADhosts.txt
+#   invalid_domains: 15621
+# KADhosts.txt: Total=55662 | Accepted=39997 | Discarded=15621 (28.06%) | Contribution=39995 (2.54% of final) | Unique=2961 (7.40% of contrib)
+#https://raw.githubusercontent.com/PolishFiltersTeam/KADhosts/master/KADhosts.txt
+
+#Perflyst and Dandelion Sprout's Smart-TV Blocklist
+# Source: filter_7.txt
+#   invalid_domains: 20
+#   discarded whitelist (potential malicious upstream): 9
+#   Invalid Chars: 4
+# filter_7.txt: Total=193 | Accepted=126 | Discarded=33 (17.10%) | Contribution=126 (0.01% of final) | Unique=31 (24.60% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_7.txt
+
 ##########################已经被包含上游##########################
+#NoCoin Filter List
+# Source: filter_8.txt
+#   invalid_domains: 83
+# filter_8.txt: Total=323 | Accepted=230 | Discarded=83 (25.70%) | Contribution=230 (0.01% of final) | Unique=60 (26.09% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_8.txt
+# 防浏览器挖矿(=filter_8.txt)
+#https://raw.githubusercontent.com/hoshsadiq/adblock-nocoin-list/master/hosts.txt
+
+#Dandelion Sprout's Anti Push Notifications
+# Source: filter_39.txt
+#   TLD/Single Word: 34
+#   invalid_domains: 24
+#   Invalid Chars: 4
+# filter_39.txt: Total=477 | Accepted=406 | Discarded=62 (13.00%) | Contribution=406 (0.04% of final) | Unique=32 (7.88% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_39.txt
+#Dandelion Sprout's Game Console Adblock List
+# filter_6.txt: Total=38 | Accepted=15 | Discarded=0 (0.00%) | Contribution=15 (0.00% of final) | Unique=7 (46.67% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_6.txt
+#Dandelion Sprout's Anti-Malware List
+# Source: filter_12.txt
+#   invalid_domains: 1462
+#   TLD/Single Word: 235
+#   Invalid Chars: 102
+#   discarded whitelist (potential malicious upstream): 2
+# filter_12.txt: Total=15343 | Accepted=13533 | Discarded=1801 (11.74%) | Contribution=13532 (1.21% of final) | Unique=1203 (8.89% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_12.txt
+
+#Firebog w3kbl
+# Source: w3kbl.txt
+#   invalid_domains: 53
+# w3kbl.txt: Total=419 | Accepted=302 | Discarded=53 (12.65%) | Contribution=299 (0.03% of final) | Unique=78 (26.09% of contrib)
+#https://v.firebog.net/hosts/static/w3kbl.txt
+
+#Stalkerware Indicators List
+# Source: filter_31.txt
+#   invalid_domains: 283
+# filter_31.txt: Total=928 | Accepted=770 | Discarded=149 (16.06%) | Contribution=770 (0.07% of final) | Unique=544 (70.65% of contrib)
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
