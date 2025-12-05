@@ -7,6 +7,7 @@ import (
 	"math/rand"
 	"net/http"
 	"os"
+	"path" // 新增：用于获取文件名
 	"regexp"
 	"sort"
 	"strings"
@@ -82,6 +83,56 @@ var dnsClient = &dns.Client{
 	UDPSize: 4096,
 }
 
+// SourceNamer 负责在并发环境下安全地将 URL 转换为唯一的文件名
+type SourceNamer struct {
+	mu sync.Mutex
+	// nameCounter: 跟踪原始文件名出现的次数 (例如 list-one.txt: 3)
+	nameCounter map[string]int
+	// urlToBasename: 缓存 URL 到最终生成的文件名的映射 (例如 https://.../list-one.txt -> list-one.txt-1)
+	urlToBasename map[string]string
+}
+
+func NewSourceNamer() *SourceNamer {
+	return &SourceNamer{
+		nameCounter:   make(map[string]int),
+		urlToBasename: make(map[string]string),
+	}
+}
+
+// GetUniqueBasename 将 URL 转换为唯一的文件名，并处理重复编号
+// 在下载时调用，以避免在内存中存储冗长的 URL 字符串
+func (n *SourceNamer) GetUniqueBasename(sourceURL string) string {
+	n.mu.Lock()
+	defer n.mu.Unlock()
+
+	// 检查缓存
+	if basename, ok := n.urlToBasename[sourceURL]; ok {
+		return basename
+	}
+
+	// 1. 使用 path.Base 获取文件名
+	baseName := path.Base(sourceURL)
+
+	// 2. 检查文件名是否重复并添加编号
+	if _, exists := n.nameCounter[baseName]; !exists {
+		// 第一次出现，直接使用
+		n.nameCounter[baseName] = 1
+		n.urlToBasename[sourceURL] = baseName
+		return baseName
+	}
+
+	// 重复出现，生成带编号的新名称
+	n.nameCounter[baseName]++
+	count := n.nameCounter[baseName]
+
+	// 生成带编号的文件名，例如 2-list.txt
+	finalName := fmt.Sprintf("%d-%s", count, baseName)
+
+	// 将最终的唯一名称存入缓存
+	n.urlToBasename[sourceURL] = finalName
+	return finalName
+}
+
 func main() {
 	rand.Seed(time.Now().UnixNano())
 	start := time.Now()
@@ -115,7 +166,10 @@ func main() {
 	}
 
 	// 4. 下载并去重规则
-	ruleSources := downloadAndDeduplicate(upstreams)
+	// 实例化 SourceNamer，用于将 URL 转换为唯一的文件名
+	sourceNamer := NewSourceNamer()
+	// 将 sourceNamer 传入，以便在下载时即刻处理 URL，减少内存占用
+	ruleSources := downloadAndDeduplicate(upstreams, sourceNamer)
 	fmt.Printf(">>> [Rules] 唯一规则数: %d\n", len(ruleSources))
 
 	rules := make([]string, 0, len(ruleSources))
@@ -318,7 +372,9 @@ func fetchUpstreamList(url string) ([]string, error) {
 	return list, scanner.Err()
 }
 
-func downloadAndDeduplicate(upstreams []string) map[string]map[string]struct{} {
+// downloadAndDeduplicate 修改签名，接收 SourceNamer
+// 返回值 map[string]map[string]struct{} 中，内层的 string 现在是简化且唯一的 basename
+func downloadAndDeduplicate(upstreams []string, namer *SourceNamer) map[string]map[string]struct{} {
 	ruleSources := make(map[string]map[string]struct{})
 	var mu sync.Mutex
 	var wg sync.WaitGroup
@@ -335,6 +391,9 @@ func downloadAndDeduplicate(upstreams []string) map[string]map[string]struct{} {
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
+			// 立即将冗长的 URL 转换为简洁且唯一的 SourceName，减少内存占用
+			sourceName := namer.GetUniqueBasename(u)
+
 			rules := downloadAndParse(u)
 			if rules == nil {
 				return
@@ -344,7 +403,8 @@ func downloadAndDeduplicate(upstreams []string) map[string]map[string]struct{} {
 				if _, ok := ruleSources[r]; !ok {
 					ruleSources[r] = make(map[string]struct{})
 				}
-				ruleSources[r][u] = struct{}{}
+				// 存储的是 sourceName 而不是完整的 URL
+				ruleSources[r][sourceName] = struct{}{}
 			}
 			mu.Unlock()
 		}(url)
@@ -453,6 +513,7 @@ func writeInvalidToFile(filename string, domains []string) error {
 	return w.Flush()
 }
 
+// writeDebugToFile 恢复为简洁逻辑，直接使用已在内存中简化的 sources (Basenames)
 func writeDebugToFile(filename string, invalidSources map[string][]string) error {
 	f, err := os.Create(filename)
 	if err != nil {
@@ -460,9 +521,11 @@ func writeDebugToFile(filename string, invalidSources map[string][]string) error
 	}
 	defer f.Close()
 	w := bufio.NewWriter(f)
-	fmt.Fprintln(w, "! Title: Debug Invalid Domains with Sources")
+	// 修改 Title 以反映 source 已被简化
+	fmt.Fprintln(w, "! Title: Debug Invalid Domains with Simplified Sources")
 	fmt.Fprintf(w, "! Updated: %s\n", time.Now().Format(time.RFC3339))
-	fmt.Fprintln(w, "! Format: domain | source1,source2,...")
+	// 修改 Format 描述
+	fmt.Fprintln(w, "! Format: domain | simplified_basename1,simplified_basename2,...")
 
 	domains := make([]string, 0, len(invalidSources))
 	for d := range invalidSources {
@@ -471,6 +534,7 @@ func writeDebugToFile(filename string, invalidSources map[string][]string) error
 	sort.Strings(domains)
 
 	for _, d := range domains {
+		// sources 已经是简化且唯一的 basename 列表
 		fmt.Fprintf(w, "%s | %s\n", d, strings.Join(invalidSources[d], ","))
 	}
 	return w.Flush()
