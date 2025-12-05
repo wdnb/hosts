@@ -40,10 +40,6 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_2.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_24.txt
 # Frogeye Multi-party trackers
 https://hostfiles.frogeye.fr/multiparty-trackers.txt
-# NoTrack Malware Blocklist
-https://gitlab.com/quidsup/notrack-blocklists/raw/master/malware.list
-# NoTrack Tracker Blocklist
-https://gitlab.com/quidsup/notrack-blocklists/raw/master/trackers.list
 
 ##########################不活跃上游##########################
 #Phishing Army 
