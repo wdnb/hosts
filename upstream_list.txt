@@ -26,8 +26,6 @@ https://adguardteam.github.io/HostlistsRegistry/assets/filter_59.txt
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_1.txt
 #OISD Blocklist Big
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_27.txt
-#Peter Lowe's Blocklist
-https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt
 #uBlock₀ filters – Badware risks
 https://adguardteam.github.io/HostlistsRegistry/assets/filter_50.txt
 #Scam Blocklist by DurableNapkin
@@ -172,3 +170,9 @@ https://hostfiles.frogeye.fr/multiparty-trackers.txt
 #   invalid_domains: 283
 # filter_31.txt: Total=928 | Accepted=770 | Discarded=149 (16.06%) | Contribution=770 (0.07% of final) | Unique=544 (70.65% of contrib)
 #https://adguardteam.github.io/HostlistsRegistry/assets/filter_31.txt
+
+#Peter Lowe's Blocklist (屏蔽了||t.co^)
+# filter_3.txt: Total=3494 | Accepted=3440 | Discarded=43 (1.23%) | Contribution=3440 (0.30% of final) | Unique=95 (2.76% of contrib)
+# Source: filter_3.txt
+#   invalid_domains: 43
+#https://adguardteam.github.io/HostlistsRegistry/assets/filter_3.txt
